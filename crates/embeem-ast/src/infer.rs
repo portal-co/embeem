@@ -131,7 +131,7 @@ pub fn infer_expression_type(expr: &Expression, ctx: &TypeContext) -> Option<Typ
             }
         }
 
-        Expression::Operation { path, args } => infer_operation_type(path, args, ctx),
+        Expression::Operation { path, extern_fn: _, args } => infer_operation_type(path, args, ctx),
 
         Expression::Call { function, .. } => ctx
             .get_function_return_type(function)

@@ -4,21 +4,25 @@
 //!
 //! Operations in Embeem are represented as paths of UPPER_SNAKE_CASE segments.
 //! During code generation, these paths are mangled into C function names using
-//! the following scheme:
+//! a length-prefixed encoding scheme:
 //!
-//! 1. The path segments are joined with underscores
-//! 2. The result is converted to lowercase
-//! 3. The operation prefix (default: `embeem_op_`) is prepended
+//! 1. Start with op_prefix (default: `embeem_op_`)
+//! 2. Append `$` and the number of path segments
+//! 3. For each segment: `_` + length + `_` + segment name
+//! 4. For hybrid operations: `_` + extern function name
 //!
 //! ## Examples
 //!
 //! | Embeem Syntax | Path | Mangled Name |
 //! |---------------|------|--------------|
-//! | `FSUB(a, b)` | `["FSUB"]` | `embeem_op_fsub` |
-//! | `GPIO_READ(pin)` | `["GPIO_READ"]` | `embeem_op_gpio_read` |
-//! | `WRITE(GPIO(pin), val)` | `["WRITE", "GPIO"]` | `embeem_op_write_gpio` |
-//! | `READ(ADC(ch))` | `["READ", "ADC"]` | `embeem_op_read_adc` |
-//! | `A(B(C(x)))` | `["A", "B", "C"]` | `embeem_op_a_b_c` |
+//! | `FSUB(a, b)` | `["FSUB"]` | `embeem_op_$1_4_FSUB` |
+//! | `GPIO_READ(pin)` | `["GPIO_READ"]` | `embeem_op_$1_9_GPIO_READ` |
+//! | `WRITE(GPIO(pin), val)` | `["WRITE", "GPIO"]` | `embeem_op_$2_5_WRITE_4_GPIO` |
+//! | `READ(ADC(ch))` | `["READ", "ADC"]` | `embeem_op_$2_4_READ_3_ADC` |
+//! | `A(B(C(x)))` | `["A", "B", "C"]` | `embeem_op_$3_1_A_1_B_1_C` |
+//! | `WRITE(GPIO(sensor_read(x)))` | `["WRITE", "GPIO"]` + extern `sensor_read` | `embeem_op_$2_5_WRITE_4_GPIO_sensor_read` |
+//!
+//! This scheme is unambiguous and allows the original path to be decoded.
 
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -56,7 +60,7 @@ pub struct CodegenOptions {
     /// Default is "embeem_".
     pub mangle_prefix: String,
     /// Prefix for operation function names.
-    /// Users can customize this to provide their own operation implementations.
+    /// This is prepended before the length-prefixed encoding.
     /// Default is "embeem_op_".
     pub op_prefix: String,
 }
@@ -89,7 +93,7 @@ impl CodegenOptions {
         self
     }
 
-    /// Set the operation function prefix for customizing operation implementations.
+    /// Set the operation function prefix.
     pub fn with_op_prefix(mut self, prefix: &str) -> Self {
         self.op_prefix = prefix.to_string();
         self
@@ -173,72 +177,18 @@ impl CCodegen {
         self.emit_line("#include <stdint.h>");
         self.emit_line("#include <stdbool.h>");
         self.emit_line("");
-        
-        // Generate static inline functions for operations with direct C equivalents
-        self.emit_line("/* Inline implementations for operations with direct C equivalents */");
-        self.emit_line("");
-        
-        // Arithmetic operations
-        self.emit_inline_binop("add", "+");
-        self.emit_inline_binop("sub", "-");
-        self.emit_inline_binop("mul", "*");
-        self.emit_line(&format!("static inline uint64_t {}div(uint64_t a, uint64_t b) {{ return b != 0 ? a / b : 0; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}mod(uint64_t a, uint64_t b) {{ return b != 0 ? a % b : 0; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}inc(uint64_t x) {{ return x + 1; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}dec(uint64_t x) {{ return x - 1; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline int64_t {}neg(int64_t x) {{ return -x; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline int64_t {}abs(int64_t x) {{ return x < 0 ? -x : x; }}", self.options.op_prefix));
-        self.emit_line("");
-        
-        // Bitwise operations
-        self.emit_inline_binop("and", "&");
-        self.emit_inline_binop("or", "|");
-        self.emit_inline_binop("xor", "^");
-        self.emit_line(&format!("static inline uint64_t {}not(uint64_t x) {{ return ~x; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}shl(uint64_t x, uint64_t n) {{ return x << n; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}shr(uint64_t x, uint64_t n) {{ return x >> n; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline int64_t {}sar(int64_t x, uint64_t n) {{ return x >> n; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}rol(uint64_t x, uint64_t n) {{ n &= 63; return (x << n) | (x >> (64 - n)); }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}ror(uint64_t x, uint64_t n) {{ n &= 63; return (x >> n) | (x << (64 - n)); }}", self.options.op_prefix));
-        self.emit_line("");
-        
-        // Comparison operations
-        self.emit_line(&format!("static inline bool {}eq(uint64_t a, uint64_t b) {{ return a == b; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}ne(uint64_t a, uint64_t b) {{ return a != b; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}lt(uint64_t a, uint64_t b) {{ return a < b; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}le(uint64_t a, uint64_t b) {{ return a <= b; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}gt(uint64_t a, uint64_t b) {{ return a > b; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}ge(uint64_t a, uint64_t b) {{ return a >= b; }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline int32_t {}cmp(uint64_t a, uint64_t b) {{ return a < b ? -1 : (a > b ? 1 : 0); }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}test(uint64_t a, uint64_t b) {{ return (a & b) != 0; }}", self.options.op_prefix));
-        self.emit_line("");
-        
-        // Bit manipulation
-        self.emit_line(&format!("static inline uint64_t {}set_bit(uint64_t x, uint64_t n) {{ return x | (1ULL << n); }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}clear_bit(uint64_t x, uint64_t n) {{ return x & ~(1ULL << n); }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline uint64_t {}toggle_bit(uint64_t x, uint64_t n) {{ return x ^ (1ULL << n); }}", self.options.op_prefix));
-        self.emit_line(&format!("static inline bool {}test_bit(uint64_t x, uint64_t n) {{ return (x & (1ULL << n)) != 0; }}", self.options.op_prefix));
-        self.emit_line("");
-        
-        // Control flow
-        self.emit_line(&format!("static inline void {}nop(void) {{ }}", self.options.op_prefix));
-        self.emit_line("");
 
-        self.emit_line("/* Platform-specific operation declarations */");
-        self.emit_line("/* These functions should be provided by the target platform. */");
-        self.emit_line(&format!("/* All platform operations use the '{}' prefix. */", self.options.op_prefix));
-        self.emit_line("/* Example declarations: */");
-        self.emit_line(&format!("/*   uint8_t {}gpio_read(uint64_t pin); */", self.options.op_prefix));
-        self.emit_line(&format!("/*   void {}gpio_write(uint64_t pin, uint64_t value); */", self.options.op_prefix));
-        self.emit_line(&format!("/*   void {}delay_ms(uint64_t ms); */", self.options.op_prefix));
+        self.emit_line("/* Operation Mangling Scheme */");
+        self.emit_line("/* Operations use length-prefixed encoding: <prefix>$<n>_<len>_<SEG>... */");
+        self.emit_line("/* Examples: */");
+        self.emit_line("/*   FSUB(a, b)           -> embeem_op_$1_4_FSUB(a, b) */");
+        self.emit_line("/*   WRITE(GPIO(pin), v)  -> embeem_op_$2_5_WRITE_4_GPIO(pin, v) */");
+        self.emit_line("/*   Hybrid operations append extern fn name: */");
+        self.emit_line("/*   WRITE(GPIO(fn(x)))   -> embeem_op_$2_5_WRITE_4_GPIO_fn(x) */");
         self.emit_line("");
-    }
-
-    fn emit_inline_binop(&mut self, name: &str, op: &str) {
-        self.emit_line(&format!(
-            "static inline uint64_t {}{}(uint64_t a, uint64_t b) {{ return a {} b; }}",
-            self.options.op_prefix, name, op
-        ));
+        self.emit_line("/* Note: Basic operations (ADD, SUB, MUL, etc.) are inlined as C operators. */");
+        self.emit_line("/* Other operations must be provided by the platform. */");
+        self.emit_line("");
     }
 
     /// Mangle a function name to avoid symbol collisions.
@@ -566,8 +516,8 @@ impl CCodegen {
                 }
             }
 
-            Expression::Operation { path, args } => {
-                self.emit_operation_path(path, args)
+            Expression::Operation { path, extern_fn, args } => {
+                self.emit_operation_path(path, extern_fn.as_deref(), args)
             }
 
             Expression::Call { function, args } => {
@@ -613,65 +563,86 @@ impl CCodegen {
         }
     }
 
-    /// Emit an operation call with a path.
+    /// Emit an operation call with a path and optional extern function.
     ///
     /// Some common single-segment operations (like ADD, SUB, etc.) are optimized
     /// to emit inline C operators for efficiency. All other operations use the
     /// mangled function name.
-    fn emit_operation_path(&mut self, path: &[String], args: &[Expression]) -> Result<String, CodegenError> {
+    ///
+    /// For hybrid operations (where extern_fn is Some), the extern function name
+    /// is appended to the mangled name.
+    ///
+    /// Example: `WRITE(GPIO(sensor_read(pin)))` where `sensor_read` is an extern fn
+    /// generates: `$2_5_WRITE_4_GPIO_sensor_read(pin)`
+    fn emit_operation_path(&mut self, path: &[String], extern_fn: Option<&str>, args: &[Expression]) -> Result<String, CodegenError> {
         let arg_strs: Result<Vec<_>, _> = args.iter().map(|a| self.expr_to_c(a)).collect();
         let arg_strs = arg_strs?;
 
-        // For single-segment operations, check if we can use inline C operators
-        if path.len() == 1 {
-            let op = path[0].as_str();
-            match (op, arg_strs.len()) {
-                ("ADD", 2) => return Ok(format!("({} + {})", arg_strs[0], arg_strs[1])),
-                ("SUB", 2) => return Ok(format!("({} - {})", arg_strs[0], arg_strs[1])),
-                ("MUL", 2) => return Ok(format!("({} * {})", arg_strs[0], arg_strs[1])),
-                ("DIV", 2) => return Ok(format!("({1} != 0 ? ({0}) / ({1}) : 0)", arg_strs[0], arg_strs[1])),
-                ("MOD", 2) => return Ok(format!("({1} != 0 ? ({0}) % ({1}) : 0)", arg_strs[0], arg_strs[1])),
-                ("INC", 1) => return Ok(format!("({} + 1)", arg_strs[0])),
-                ("DEC", 1) => return Ok(format!("({} - 1)", arg_strs[0])),
-                ("NEG", 1) => return Ok(format!("(-{})", arg_strs[0])),
-                ("ABS", 1) => return Ok(format!("(({0}) < 0 ? -({0}) : ({0}))", arg_strs[0])),
-                ("AND", 2) => return Ok(format!("({} & {})", arg_strs[0], arg_strs[1])),
-                ("OR", 2) => return Ok(format!("({} | {})", arg_strs[0], arg_strs[1])),
-                ("XOR", 2) => return Ok(format!("({} ^ {})", arg_strs[0], arg_strs[1])),
-                ("NOT", 1) => return Ok(format!("(~{})", arg_strs[0])),
-                ("SHL", 2) => return Ok(format!("({} << {})", arg_strs[0], arg_strs[1])),
-                ("SHR", 2) => return Ok(format!("({} >> {})", arg_strs[0], arg_strs[1])),
-                ("EQ", 2) => return Ok(format!("({} == {})", arg_strs[0], arg_strs[1])),
-                ("NE", 2) => return Ok(format!("({} != {})", arg_strs[0], arg_strs[1])),
-                ("LT", 2) => return Ok(format!("({} < {})", arg_strs[0], arg_strs[1])),
-                ("LE", 2) => return Ok(format!("({} <= {})", arg_strs[0], arg_strs[1])),
-                ("GT", 2) => return Ok(format!("({} > {})", arg_strs[0], arg_strs[1])),
-                ("GE", 2) => return Ok(format!("({} >= {})", arg_strs[0], arg_strs[1])),
-                ("NOP", 0) => return Ok("((void)0)".to_string()),
-                _ => {}
+        // Hybrid operations cannot use inline C operators - they call the extern fn
+        // as part of a combined operation
+        if extern_fn.is_none() {
+            // For single-segment operations, check if we can use inline C operators
+            if path.len() == 1 {
+                let op = path[0].as_str();
+                match (op, arg_strs.len()) {
+                    ("ADD", 2) => return Ok(format!("({} + {})", arg_strs[0], arg_strs[1])),
+                    ("SUB", 2) => return Ok(format!("({} - {})", arg_strs[0], arg_strs[1])),
+                    ("MUL", 2) => return Ok(format!("({} * {})", arg_strs[0], arg_strs[1])),
+                    ("DIV", 2) => return Ok(format!("({1} != 0 ? ({0}) / ({1}) : 0)", arg_strs[0], arg_strs[1])),
+                    ("MOD", 2) => return Ok(format!("({1} != 0 ? ({0}) % ({1}) : 0)", arg_strs[0], arg_strs[1])),
+                    ("INC", 1) => return Ok(format!("({} + 1)", arg_strs[0])),
+                    ("DEC", 1) => return Ok(format!("({} - 1)", arg_strs[0])),
+                    ("NEG", 1) => return Ok(format!("(-{})", arg_strs[0])),
+                    ("ABS", 1) => return Ok(format!("(({0}) < 0 ? -({0}) : ({0}))", arg_strs[0])),
+                    ("AND", 2) => return Ok(format!("({} & {})", arg_strs[0], arg_strs[1])),
+                    ("OR", 2) => return Ok(format!("({} | {})", arg_strs[0], arg_strs[1])),
+                    ("XOR", 2) => return Ok(format!("({} ^ {})", arg_strs[0], arg_strs[1])),
+                    ("NOT", 1) => return Ok(format!("(~{})", arg_strs[0])),
+                    ("SHL", 2) => return Ok(format!("({} << {})", arg_strs[0], arg_strs[1])),
+                    ("SHR", 2) => return Ok(format!("({} >> {})", arg_strs[0], arg_strs[1])),
+                    ("EQ", 2) => return Ok(format!("({} == {})", arg_strs[0], arg_strs[1])),
+                    ("NE", 2) => return Ok(format!("({} != {})", arg_strs[0], arg_strs[1])),
+                    ("LT", 2) => return Ok(format!("({} < {})", arg_strs[0], arg_strs[1])),
+                    ("LE", 2) => return Ok(format!("({} <= {})", arg_strs[0], arg_strs[1])),
+                    ("GT", 2) => return Ok(format!("({} > {})", arg_strs[0], arg_strs[1])),
+                    ("GE", 2) => return Ok(format!("({} >= {})", arg_strs[0], arg_strs[1])),
+                    ("NOP", 0) => return Ok("((void)0)".to_string()),
+                    _ => {}
+                }
             }
         }
 
-        // For all other operations, use the mangled function name
-        let op_name = self.mangle_operation_path(path);
+        // For all operations (including hybrid), use the mangled function name
+        let op_name = self.mangle_operation_path(path, extern_fn);
         Ok(format!("{}({})", op_name, arg_strs.join(", ")))
     }
 
-    /// Mangle an operation path into a C function name.
+    /// Mangle an operation path into a C function name using length-prefixed encoding.
     ///
     /// The mangling scheme is:
-    /// 1. Join path segments with underscores
-    /// 2. Convert to lowercase
-    /// 3. Prepend the operation prefix
+    /// 1. Start with op_prefix (default: `embeem_op_`)
+    /// 2. Append `$` and number of path segments
+    /// 3. For each segment: `_` + length + `_` + segment name
+    /// 4. For hybrid operations: `_` + extern function name
     ///
-    /// Examples:
-    /// - `["FSUB"]` -> `embeem_op_fsub`
-    /// - `["WRITE", "GPIO"]` -> `embeem_op_write_gpio`
-    /// - `["READ", "ADC"]` -> `embeem_op_read_adc`
-    fn mangle_operation_path(&self, path: &[String]) -> String {
-        let prefix = &self.options.op_prefix;
-        let joined = path.join("_").to_lowercase();
-        format!("{}{}", prefix, joined)
+    /// Examples (with default prefix):
+    /// - `["FSUB"]` -> `embeem_op_$1_4_FSUB`
+    /// - `["WRITE", "GPIO"]` -> `embeem_op_$2_5_WRITE_4_GPIO`
+    /// - `["READ", "ADC"]` -> `embeem_op_$2_4_READ_3_ADC`
+    /// - `["WRITE", "GPIO"]` with extern_fn `sensor_read` -> `embeem_op_$2_5_WRITE_4_GPIO_sensor_read`
+    ///
+    /// This scheme is unambiguous and allows decoding the original path.
+    fn mangle_operation_path(&self, path: &[String], extern_fn: Option<&str>) -> String {
+        let mut result = format!("{}${}", self.options.op_prefix, path.len());
+        for segment in path {
+            result.push_str(&format!("_{}_", segment.len()));
+            result.push_str(segment);
+        }
+        if let Some(fn_name) = extern_fn {
+            result.push('_');
+            result.push_str(fn_name);
+        }
+        result
     }
 
     /// Emit a block expression using GCC statement expression syntax: `({ ... })`
@@ -998,8 +969,8 @@ mod tests {
         let c_code = compile_to_c(&program).unwrap();
         // Function names are mangled with prefix
         assert!(c_code.contains("void embeem_main(void)"));
-        // GPIO operations use the op_prefix
-        assert!(c_code.contains("embeem_op_gpio_set_mode"));
+        // GPIO operations use length-prefixed mangling: embeem_op_$1_13_GPIO_SET_MODE
+        assert!(c_code.contains("embeem_op_$1_13_GPIO_SET_MODE"), "Expected length-prefixed mangling, got:\n{}", c_code);
     }
 
     #[test]
@@ -1213,5 +1184,42 @@ mod tests {
             "Expected call to get_sensor_value, got:\n{}", c_code);
         assert!(c_code.contains("set_led("), 
             "Expected call to set_led, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_hybrid_operation_mangling() {
+        let src = r#"
+            extern fn sensor_read(channel: u8) -> u16;
+            
+            fn main() {
+                // Hybrid operation: extern fn as last segment of operation path
+                WRITE(GPIO(sensor_read(0)));
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        
+        // Hybrid operations use length-prefixed mangling with extern fn appended
+        // WRITE(GPIO(sensor_read(0))) -> embeem_op_$2_5_WRITE_4_GPIO_sensor_read(0)
+        assert!(c_code.contains("embeem_op_$2_5_WRITE_4_GPIO_sensor_read("), 
+            "Expected hybrid mangled name embeem_op_$2_5_WRITE_4_GPIO_sensor_read, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_operation_mangling_examples() {
+        // Test various mangling examples
+        let src = r#"
+            fn main() {
+                FSUB(1.0, 2.0);
+                READ(ADC(0));
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        
+        // FSUB -> embeem_op_$1_4_FSUB
+        assert!(c_code.contains("embeem_op_$1_4_FSUB("), "Expected embeem_op_$1_4_FSUB, got:\n{}", c_code);
+        // READ(ADC(...)) -> embeem_op_$2_4_READ_3_ADC
+        assert!(c_code.contains("embeem_op_$2_4_READ_3_ADC("), "Expected embeem_op_$2_4_READ_3_ADC, got:\n{}", c_code);
     }
 }

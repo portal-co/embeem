@@ -154,7 +154,7 @@
     
     "operationExpr": {
       "type": "object",
-      "description": "An operation call with a path of UPPER_SNAKE_CASE segments. The path is built by collecting nested operation identifiers.",
+      "description": "An operation call with a path of UPPER_SNAKE_CASE segments. The path is built by collecting nested operation identifiers. Optionally, an extern function can terminate the path (hybrid operation).",
       "properties": {
         "kind": { "const": "operation" },
         "path": {
@@ -162,6 +162,10 @@
           "items": { "$ref": "#/definitions/operationIdentifier" },
           "minItems": 1,
           "description": "Path segments collected from nested UPPER_SNAKE_CASE calls. E.g., WRITE(GPIO(13), 1) becomes ['WRITE', 'GPIO']"
+        },
+        "externFn": {
+          "type": "string",
+          "description": "Optional: name of an extern function that terminates the operation path (hybrid operation). E.g., WRITE(GPIO(sensor_read(0))) has externFn='sensor_read'"
         },
         "arguments": {
           "type": "array",
@@ -197,16 +201,27 @@
             { "kind": "literal", "value": 1000 }
           ],
           "_comment": "SET_FREQUENCY(PWM(0), 1000)"
+        },
+        {
+          "kind": "operation",
+          "path": ["WRITE", "GPIO"],
+          "externFn": "sensor_read",
+          "arguments": [
+            { "kind": "literal", "value": 0 }
+          ],
+          "_comment": "WRITE(GPIO(sensor_read(0))) - hybrid operation"
         }
       ],
       "manglingScheme": {
-        "description": "Operation paths are mangled to C function names by: 1) joining segments with underscores, 2) converting to lowercase, 3) prepending the operation prefix (embeem_op_ by default)",
+        "description": "Operation paths are mangled using length-prefixed encoding: <op_prefix>$<n>_<len>_<SEG>... For hybrid operations, append _ and the extern fn name.",
+        "format": "<op_prefix>$<segment_count>_<len1>_<SEG1>_<len2>_<SEG2>...[_<externFn>]",
         "examples": [
-          { "path": ["FSUB"], "mangledName": "embeem_op_fsub" },
-          { "path": ["GPIO_READ"], "mangledName": "embeem_op_gpio_read" },
-          { "path": ["READ", "GPIO"], "mangledName": "embeem_op_read_gpio" },
-          { "path": ["WRITE", "GPIO"], "mangledName": "embeem_op_write_gpio" },
-          { "path": ["SET_FREQUENCY", "PWM"], "mangledName": "embeem_op_set_frequency_pwm" }
+          { "path": ["FSUB"], "mangledName": "embeem_op_$1_4_FSUB" },
+          { "path": ["GPIO_READ"], "mangledName": "embeem_op_$1_9_GPIO_READ" },
+          { "path": ["READ", "GPIO"], "mangledName": "embeem_op_$2_4_READ_4_GPIO" },
+          { "path": ["WRITE", "GPIO"], "mangledName": "embeem_op_$2_5_WRITE_4_GPIO" },
+          { "path": ["SET_FREQUENCY", "PWM"], "mangledName": "embeem_op_$2_13_SET_FREQUENCY_3_PWM" },
+          { "path": ["WRITE", "GPIO"], "externFn": "sensor_read", "mangledName": "embeem_op_$2_5_WRITE_4_GPIO_sensor_read" }
         ],
         "note": "Single-segment paths for built-in C operators (ADD, SUB, MUL, etc.) may be inlined directly as C operators rather than function calls"
       }

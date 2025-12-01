@@ -542,44 +542,125 @@ Common targets include: `GPIO`, `ADC`, `DAC`, `PWM`, `TIMER`, `UART`, `SPI`, `I2
 
 #### 7.14.5 Code Generation and Mangling
 
-Operation paths are mangled into C function names using the following scheme:
+Operation paths are mangled into C function names using **length-prefixed encoding**:
 
-1. Join path segments with underscores
-2. Convert to lowercase
-3. Prepend the operation prefix (`embeem_op_` by default)
+1. Start with op_prefix (default: `embeem_op_`)
+2. Append `$` and the number of path segments
+3. For each segment: `_` + length + `_` + segment name (preserving case)
+4. For hybrid operations: `_` + extern function name
 
 | Path | Mangled C Function |
 |------|-------------------|
-| `["FSUB"]` | `embeem_op_fsub` |
-| `["GPIO_READ"]` | `embeem_op_gpio_read` |
-| `["READ", "GPIO"]` | `embeem_op_read_gpio` |
-| `["WRITE", "GPIO"]` | `embeem_op_write_gpio` |
-| `["SET_FREQUENCY", "PWM"]` | `embeem_op_set_frequency_pwm` |
+| `["FSUB"]` | `embeem_op_$1_4_FSUB` |
+| `["GPIO_READ"]` | `embeem_op_$1_9_GPIO_READ` |
+| `["READ", "GPIO"]` | `embeem_op_$2_4_READ_4_GPIO` |
+| `["WRITE", "GPIO"]` | `embeem_op_$2_5_WRITE_4_GPIO` |
+| `["SET_FREQUENCY", "PWM"]` | `embeem_op_$2_13_SET_FREQUENCY_3_PWM` |
+
+This scheme is:
+- **Unambiguous**: The original path can be decoded from the mangled name
+- **Collision-free**: Different paths produce different mangled names
+- **Readable**: The segment names are preserved verbatim
 
 **Note**: Single-segment paths for built-in C operators (e.g., `["ADD"]`, `["SUB"]`, `["MUL"]`) may be inlined directly as C operators rather than function calls.
 
-#### 7.14.6 Implementation Notes
+#### 7.14.6 Hybrid Operations
+
+A **hybrid operation** allows an external function to appear as the last segment of an operation path. This provides readable syntax for operations that combine a hardware operation with a custom data source.
+
+##### Syntax
+
+```
+HYBRID_CALL ::= OP_SEGMENT '(' (HYBRID_CALL | EXTERN_CALL) (',' EXPR)* ')'
+
+EXTERN_CALL ::= lower_snake_case '(' EXPR* ')'
+```
+
+When parsing an operation call, if a segment is *not* `UPPER_SNAKE_CASE` but is followed by parentheses, it is treated as an external function call that terminates the operation path.
+
+##### Examples
+
+| Source Syntax | Path | Extern Fn | Arguments |
+|---------------|------|-----------|-----------|
+| `WRITE(GPIO(sensor_read(0)))` | `["WRITE", "GPIO"]` | `sensor_read` | `0` |
+| `PROCESS(DATA(get_value(x, y)), z)` | `["PROCESS", "DATA"]` | `get_value` | `x`, `y`, `z` |
+| `SEND(UART(format_msg(buf)))` | `["SEND", "UART"]` | `format_msg` | `buf` |
+
+##### Code Generation
+
+For hybrid operations, the extern function name is appended to the mangled operation name. This produces a single identifier that the environment can resolve.
+
+| Source | Mangled C Function |
+|--------|-------------------|
+| `WRITE(GPIO(sensor_read(0)))` | `embeem_op_$2_5_WRITE_4_GPIO_sensor_read(0)` |
+| `PROCESS(DATA(get_value(x, y)), z)` | `embeem_op_$2_7_PROCESS_4_DATA_get_value(x, y, z)` |
+| `SEND(UART(format_msg(buf)))` | `embeem_op_$2_4_SEND_4_UART_format_msg(buf)` |
+
+The mangling scheme for hybrid operations:
+1. Mangle the path as normal (length-prefixed segments)
+2. Append `_` and the extern function name unchanged
+
+This allows the environment to:
+- Provide specific implementations for each operation+extern combination
+- Use C macros to dispatch based on the extern fn portion
+- Generate platform-specific code at link time
+
+##### Use Cases
+
+Hybrid operations are useful when:
+
+1. **Custom data sources**: Reading from a sensor via a user-provided function, then processing with a hardware operation
+2. **Data transformation**: Transforming data with an extern fn before sending to a peripheral
+3. **Abstraction**: Wrapping platform-specific code in extern fns while using portable operation paths
+
+##### Implementation
+
+The runtime provides implementations for hybrid operation functions:
+
+```c
+// Implementation for WRITE(GPIO(sensor_read(channel)))
+// Called as: embeem_op_$2_5_WRITE_4_GPIO_sensor_read(channel)
+void embeem_op_$2_5_WRITE_4_GPIO_sensor_read(uint8_t channel) {
+    uint16_t value = sensor_read(channel);
+    // write value to GPIO
+}
+
+// Or use a macro to generate implementations:
+#define HYBRID_WRITE_GPIO(fn) \
+    void embeem_op_$2_5_WRITE_4_GPIO_##fn(uint8_t arg) { \
+        uint16_t value = fn(arg); \
+        digitalWrite(value); \
+    }
+
+HYBRID_WRITE_GPIO(sensor_read)
+HYBRID_WRITE_GPIO(temp_read)
+```
+
+#### 7.14.7 Implementation Notes
 
 The runtime library must provide implementations for all operation paths used in a program. The mangling scheme ensures predictable function names:
 
 ```c
 // Implementation for READ(GPIO(pin))
-int32_t embeem_op_read_gpio(int32_t pin) {
+// Mangled: embeem_op_$2_4_READ_4_GPIO
+int32_t embeem_op_$2_4_READ_4_GPIO(int32_t pin) {
     return digitalRead(pin);
 }
 
 // Implementation for WRITE(GPIO(pin), value)
-void embeem_op_write_gpio(int32_t pin, int32_t value) {
+// Mangled: embeem_op_$2_5_WRITE_4_GPIO
+void embeem_op_$2_5_WRITE_4_GPIO(int32_t pin, int32_t value) {
     digitalWrite(pin, value);
 }
 
 // Implementation for SET_FREQUENCY(PWM(channel), freq)
-void embeem_op_set_frequency_pwm(int32_t channel, int32_t freq) {
+// Mangled: embeem_op_$2_13_SET_FREQUENCY_3_PWM
+void embeem_op_$2_13_SET_FREQUENCY_3_PWM(int32_t channel, int32_t freq) {
     // Platform-specific PWM frequency configuration
 }
 ```
 
-#### 7.14.7 Benefits
+#### 7.14.8 Benefits
 
 1. **Simplicity**: One unified model for all operations
 2. **Flexibility**: No hardcoded operation or target lists

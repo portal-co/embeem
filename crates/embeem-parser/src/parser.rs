@@ -1262,40 +1262,74 @@ fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
 /// The path contains the UPPER_SNAKE_CASE segments collected so far.
 ///
 /// This function recursively builds the operation path by checking if the first
-/// argument is also an UPPER_SNAKE_CASE operation call.
+/// argument is also an UPPER_SNAKE_CASE operation call, or a non-UPPER_SNAKE_CASE
+/// function call (for hybrid operations with external functions).
 fn parse_operation_call(input: &str, mut path: Vec<String>) -> IResult<&str, Expression> {
     let (input, _) = char('(').parse(input)?;
     let input = skip_ws(input);
     
     // Check if this is an empty argument list
     if input.starts_with(')') {
-        return Ok((&input[1..], Expression::Operation { path, args: Vec::new() }));
+        return Ok((&input[1..], Expression::Operation { path, extern_fn: None, args: Vec::new() }));
     }
     
-    // Try to parse the first argument - it might be a nested operation
+    // Try to parse the first argument - it might be a nested operation or hybrid extern fn
     let mut all_args = Vec::new();
     let mut current = input;
+    let mut extern_fn_name: Option<String> = None;
     
-    // Try to parse as identifier first to check for nested operations
+    // Try to parse as identifier first to check for nested operations or hybrid calls
     if let Ok((first_name_rest, first_name)) = identifier(current) {
         let after_first_name = skip_ws(first_name_rest);
         
         if is_upper_snake_case(&first_name) && after_first_name.starts_with('(') {
-            // This is a nested operation - add to path and recurse
+            // This is a nested UPPER_SNAKE_CASE operation - add to path and recurse
             path.push(first_name);
             
             // Parse the nested operation's arguments
             let (rest, nested_expr) = parse_operation_call(after_first_name, path)?;
             
-            // Extract args from nested operation
-            if let Expression::Operation { path: nested_path, args: nested_args } = nested_expr {
+            // Extract args and extern_fn from nested operation
+            if let Expression::Operation { path: nested_path, extern_fn: nested_extern_fn, args: nested_args } = nested_expr {
                 // Return with the full path and nested args as first args
                 all_args.extend(nested_args);
                 current = rest;
                 path = nested_path;
+                extern_fn_name = nested_extern_fn;
             } else {
                 unreachable!("parse_operation_call always returns Operation");
             }
+        } else if !is_upper_snake_case(&first_name) && after_first_name.starts_with('(') {
+            // This is a hybrid operation with an external function as the last segment
+            // e.g., WRITE(GPIO(my_sensor(ch)), value)
+            extern_fn_name = Some(first_name);
+            
+            // Parse the extern fn's arguments
+            let (after_paren, _) = char('(').parse(after_first_name)?;
+            let after_paren = skip_ws(after_paren);
+            
+            // Parse arguments for the extern fn call
+            if !after_paren.starts_with(')') {
+                let (rest, first_arg) = expression(after_paren)?;
+                all_args.push(first_arg);
+                let mut rest = skip_ws(rest);
+                
+                while rest.starts_with(',') {
+                    let after_comma = skip_ws(&rest[1..]);
+                    let (new_rest, arg) = expression(after_comma)?;
+                    all_args.push(arg);
+                    rest = skip_ws(new_rest);
+                }
+                current = rest;
+            } else {
+                current = after_paren;
+            }
+            
+            // Expect closing parenthesis for the extern fn call
+            if !current.starts_with(')') {
+                return Err(nom::Err::Error(nom::error::Error::new(current, nom::error::ErrorKind::Char)));
+            }
+            current = skip_ws(&current[1..]);
         } else {
             // First argument is a regular expression - parse it from the beginning
             let (rest, first_arg) = expression(current)?;
@@ -1309,7 +1343,7 @@ fn parse_operation_call(input: &str, mut path: Vec<String>) -> IResult<&str, Exp
         current = skip_ws(rest);
     }
     
-    // Parse remaining arguments
+    // Parse remaining arguments (only if we don't have a hybrid with extern_fn)
     while current.starts_with(',') {
         let rest = skip_ws(&current[1..]);
         let (rest, arg) = expression(rest)?;
@@ -1323,7 +1357,7 @@ fn parse_operation_call(input: &str, mut path: Vec<String>) -> IResult<&str, Exp
     }
     let current = &current[1..];
     
-    Ok((current, Expression::Operation { path, args: all_args }))
+    Ok((current, Expression::Operation { path, extern_fn: extern_fn_name, args: all_args }))
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
@@ -1489,8 +1523,9 @@ mod tests {
         let main = &prog.functions[0];
         assert_eq!(main.body.statements.len(), 1);
         // The virtual call should be parsed as an Operation with path ["WRITE", "GPIO"]
-        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[0] {
             assert_eq!(path, &["WRITE", "GPIO"]);
+            assert!(extern_fn.is_none());
             assert_eq!(args.len(), 2);
         } else {
             panic!("Expected Operation expression");
@@ -1510,8 +1545,9 @@ mod tests {
         let main = &prog.functions[0];
         // Check that it's parsed as a let statement with Operation
         if let Statement::Let { value, .. } = &main.body.statements[0] {
-            if let Expression::Operation { path, args } = value {
+            if let Expression::Operation { path, extern_fn, args } = value {
                 assert_eq!(path, &["READ", "GPIO"]);
+                assert!(extern_fn.is_none());
                 assert_eq!(args.len(), 1);
             } else {
                 panic!("Expected Operation expression");
@@ -1536,15 +1572,17 @@ mod tests {
         let main = &prog.functions[0];
         
         // Check first statement: START(PWM(0))
-        if let Statement::Expr(Expression::Operation { path, .. }) = &main.body.statements[0] {
+        if let Statement::Expr(Expression::Operation { path, extern_fn, .. }) = &main.body.statements[0] {
             assert_eq!(path, &["START", "PWM"]);
+            assert!(extern_fn.is_none());
         } else {
             panic!("Expected Operation expression");
         }
         
         // Check second statement: SET_DUTY_CYCLE(PWM(0), 128)
-        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[1] {
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[1] {
             assert_eq!(path, &["SET_DUTY_CYCLE", "PWM"]);
+            assert!(extern_fn.is_none());
             assert_eq!(args.len(), 2); // 0 and 128
         } else {
             panic!("Expected Operation expression");
@@ -1592,8 +1630,9 @@ mod tests {
         let main = &prog.functions[0];
         
         // Check first statement: ENABLE(WDT())
-        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[0] {
             assert_eq!(path, &["ENABLE", "WDT"]);
+            assert!(extern_fn.is_none());
             assert_eq!(args.len(), 0);
         } else {
             panic!("Expected Operation expression");
@@ -1613,8 +1652,9 @@ mod tests {
         let main = &prog.functions[0];
         
         // Non-virtual operation should be parsed with single-element path
-        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[0] {
             assert_eq!(path, &["GPIO_WRITE"]);
+            assert!(extern_fn.is_none());
             assert_eq!(args.len(), 2);
         } else {
             panic!("Expected Operation expression");
@@ -1634,8 +1674,9 @@ mod tests {
         let main = &prog.functions[0];
         
         // Triple-nested operation: A(B(C(1))) -> path: ["A", "B", "C"], args: [1]
-        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[0] {
             assert_eq!(path, &["A", "B", "C"]);
+            assert!(extern_fn.is_none());
             assert_eq!(args.len(), 1);
         } else {
             panic!("Expected Operation expression");
@@ -1677,5 +1718,59 @@ mod tests {
         
         // Check that the main function can call external functions
         assert_eq!(prog.functions.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_hybrid_operation() {
+        let src = r#"
+            extern fn sensor_read(channel: u8) -> u16;
+            
+            fn main() {
+                // Hybrid operation: extern fn as last segment of operation path
+                WRITE(GPIO(sensor_read(0)));
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        
+        // Check the hybrid operation
+        let main = &prog.functions[0];
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[0] {
+            assert_eq!(path, &["WRITE", "GPIO"]);
+            assert_eq!(extern_fn.as_deref(), Some("sensor_read"));
+            assert_eq!(args.len(), 1); // The argument is 0
+            if let Expression::Literal(Literal::Integer(0)) = &args[0] {
+                // Correct
+            } else {
+                panic!("Expected integer literal 0, got {:?}", args[0]);
+            }
+        } else {
+            panic!("Expected Operation expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_hybrid_operation_with_multiple_args() {
+        let src = r#"
+            extern fn read_sensor(channel: u8) -> u16;
+            
+            fn main() {
+                // Hybrid operation with additional args
+                WRITE(SPI(read_sensor(1)), 42, 0xFF);
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        
+        let main = &prog.functions[0];
+        if let Statement::Expr(Expression::Operation { path, extern_fn, args }) = &main.body.statements[0] {
+            assert_eq!(path, &["WRITE", "SPI"]);
+            assert_eq!(extern_fn.as_deref(), Some("read_sensor"));
+            assert_eq!(args.len(), 3); // 1, 42, 0xFF
+        } else {
+            panic!("Expected Operation expression");
+        }
     }
 }

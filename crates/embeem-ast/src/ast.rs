@@ -193,8 +193,17 @@ pub enum Expression {
     /// - `FSUB(a, b)` is stored as `path: ["FSUB"], args: [a, b]`
     /// - `WRITE(GPIO(pin), value)` is stored as `path: ["WRITE", "GPIO"], args: [pin, value]`
     /// - Deeper nesting is supported: `A(B(C(x), y), z)` -> `path: ["A", "B", "C"], args: [x, y, z]`
+    ///
+    /// Hybrid operations with external functions:
+    /// - `WRITE(GPIO(my_sensor(ch)), value)` where `my_sensor` is an extern fn
+    /// - Stored as `path: ["WRITE", "GPIO"], extern_fn: Some("my_sensor"), args: [ch, value]`
+    /// - The extern fn call is semantically part of the operation for readability
     Operation {
         path: Vec<String>,
+        /// Optional external function as the final "segment" of the operation path.
+        /// When present, the operation is a "hybrid" that combines an operation path
+        /// with an external function call for improved readability.
+        extern_fn: Option<String>,
         args: Vec<Expression>,
     },
     /// Function call.
