@@ -1,0 +1,11 @@
+[workspace]
+members=[]
+resolver="3"
+
+[workspace.package]
+license = "CC0-1.0"
+description = "Small, total language specification for embedded polyfills and semantics"
+repository = "https://github.com/portal-co/embeem"
+
+[workspace.dependencies]
+nom = {version="^8.0.0",default-features=false}
