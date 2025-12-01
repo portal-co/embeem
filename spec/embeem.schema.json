@@ -82,6 +82,7 @@
         { "$ref": "#/definitions/unaryExpr" },
         { "$ref": "#/definitions/ifExpr" },
         { "$ref": "#/definitions/operationExpr" },
+        { "$ref": "#/definitions/virtualCallExpr" },
         { "$ref": "#/definitions/blockExpr" },
         { "$ref": "#/definitions/callExpr" },
         { "$ref": "#/definitions/indexExpr" }
@@ -368,6 +369,59 @@
         "EEPROM_READ", "EEPROM_WRITE", "EEPROM_UPDATE", "FLASH_READ", "FLASH_WRITE", "FLASH_ERASE",
         "SET_POWER_MODE", "DISABLE_PERIPHERAL", "ENABLE_PERIPHERAL", "SET_CLOCK_SPEED", "ENTER_STANDBY", "ENTER_DEEP_SLEEP",
         "RTC_INIT", "RTC_SET_TIME", "RTC_GET_TIME", "RTC_SET_ALARM", "RTC_SET_CALENDAR"
+      ]
+    },
+    
+    "virtualOperationName": {
+      "description": "Virtual operation names for the virtual function call syntax",
+      "enum": [
+        "READ", "WRITE", "INIT", "START", "STOP", "RESET", "TOGGLE",
+        "SET_MODE", "SET_FREQUENCY", "SET_DUTY_CYCLE", "SET_CLOCK",
+        "SET_BAUD_RATE", "TRANSFER", "AVAILABLE", "FLUSH",
+        "ENABLE", "DISABLE", "SET_TIMEOUT", "SET_PERIOD", "SET_COMPARE",
+        "SET_RESOLUTION", "SET_REFERENCE", "SET_PULSE_WIDTH"
+      ]
+    },
+    
+    "targetName": {
+      "description": "Target types for virtual function call syntax",
+      "enum": [
+        "GPIO", "ADC", "DAC", "PWM", "TIMER", "UART", "SPI", "I2C",
+        "CAN", "USB", "DMA", "WDT", "EEPROM", "FLASH", "RTC"
+      ]
+    },
+    
+    "virtualCallExpr": {
+      "type": "object",
+      "description": "Virtual function call syntax: OP(TARGET(args...), additional_args...)",
+      "properties": {
+        "kind": { "const": "virtual_call" },
+        "operation": { "$ref": "#/definitions/virtualOperationName" },
+        "target": { "$ref": "#/definitions/targetName" },
+        "targetArguments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/expression" }
+        },
+        "additionalArguments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/expression" }
+        }
+      },
+      "required": ["kind", "operation", "target", "targetArguments"],
+      "examples": [
+        {
+          "kind": "virtual_call",
+          "operation": "WRITE",
+          "target": "GPIO",
+          "targetArguments": [{ "kind": "literal", "value": 13 }],
+          "additionalArguments": [{ "kind": "literal", "value": 1 }]
+        },
+        {
+          "kind": "virtual_call",
+          "operation": "READ",
+          "target": "ADC",
+          "targetArguments": [{ "kind": "literal", "value": 0 }]
+        }
       ]
     },
     

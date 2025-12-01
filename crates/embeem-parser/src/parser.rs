@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use embeem_ast::{
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal, Param,
     PrimitiveType, Program, RangeDirection, Statement, Type, UnaryOp,
+    Target, VirtualOp,
 };
 use nom::{
     IResult, Parser,
@@ -1171,6 +1172,11 @@ fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
         return Ok((input, Expression::Identifier(name)));
     }
     
+    // Check if this is a virtual operation (like READ, WRITE, etc.)
+    if let Some(virtual_op) = VirtualOp::from_str(&name) {
+        return parse_virtual_call(input_after_name, virtual_op);
+    }
+    
     // Parse arguments
     let (input, _) = char('(').parse(input_after_name)?;
     let input = skip_ws(input);
@@ -1209,6 +1215,99 @@ fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
     } else {
         Ok((current, Expression::Call { function: name, args }))
     }
+}
+
+/// Parse a virtual function call like `WRITE(GPIO(pin), value)`.
+///
+/// The virtual operation (like WRITE, READ) has already been identified.
+/// The input starts at the opening parenthesis.
+///
+/// Virtual calls have the form: `OP(TARGET(target_args...), additional_args...)`
+fn parse_virtual_call(input: &str, virtual_op: VirtualOp) -> IResult<&str, Expression> {
+    let (input, _) = char('(').parse(input)?;
+    let input = skip_ws(input);
+    
+    // The first argument should be TARGET(args...)
+    // Parse the target name
+    let (input, target_name) = identifier(input)?;
+    
+    // Check if it's a valid target
+    let target = match Target::from_str(&target_name) {
+        Some(t) => t,
+        None => {
+            // Not a virtual call target, treat as regular expression
+            // This shouldn't happen if VirtualOp::from_str was true, but just in case
+            return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
+        }
+    };
+    
+    let input = skip_ws(input);
+    
+    // Parse target's arguments (e.g., the pin number in GPIO(13))
+    let (input, _) = char('(').parse(input)?;
+    let input = skip_ws(input);
+    
+    let mut target_args = Vec::new();
+    let mut current = input;
+    
+    loop {
+        let trimmed = skip_ws(current);
+        
+        if trimmed.starts_with(')') {
+            current = &trimmed[1..];
+            break;
+        }
+        
+        let (rest, arg) = expression(trimmed)?;
+        target_args.push(arg);
+        let rest = skip_ws(rest);
+        
+        if rest.starts_with(',') {
+            current = skip_ws(&rest[1..]);
+            continue;
+        }
+        
+        if rest.starts_with(')') {
+            current = &rest[1..];
+            break;
+        }
+        
+        return Err(nom::Err::Error(nom::error::Error::new(rest, nom::error::ErrorKind::Char)));
+    }
+    
+    let current = skip_ws(current);
+    
+    // Parse additional arguments (after the target)
+    let mut additional_args = Vec::new();
+    let mut current = current;
+    
+    while current.starts_with(',') {
+        let rest = skip_ws(&current[1..]);
+        let (rest, arg) = expression(rest)?;
+        additional_args.push(arg);
+        current = skip_ws(rest);
+    }
+    
+    // Expect closing parenthesis
+    if !current.starts_with(')') {
+        return Err(nom::Err::Error(nom::error::Error::new(current, nom::error::ErrorKind::Char)));
+    }
+    let current = &current[1..];
+    
+    // Resolve the virtual operation to a concrete OpKind
+    let op_kind = match virtual_op.resolve(target) {
+        Some(k) => k,
+        None => {
+            // Invalid combination of virtual op and target
+            return Err(nom::Err::Error(nom::error::Error::new(current, nom::error::ErrorKind::Tag)));
+        }
+    };
+    
+    // Combine target_args and additional_args
+    let mut all_args = target_args;
+    all_args.extend(additional_args);
+    
+    Ok((current, Expression::Operation { kind: op_kind, args: all_args }))
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
@@ -1359,5 +1458,89 @@ mod tests {
         let prog = result.unwrap();
         assert_eq!(prog.functions[0].params.len(), 2);
         assert!(prog.functions[0].return_type.is_some());
+    }
+
+    #[test]
+    fn test_parse_virtual_call_write_gpio() {
+        let src = r#"
+            fn main() {
+                WRITE(GPIO(13), 1);
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        let main = &prog.functions[0];
+        assert_eq!(main.body.statements.len(), 1);
+        // The virtual call should be parsed as an Operation with GpioWrite
+        if let Statement::Expr(Expression::Operation { kind, args }) = &main.body.statements[0] {
+            assert_eq!(*kind, embeem_ast::OpKind::GpioWrite);
+            assert_eq!(args.len(), 2);
+        } else {
+            panic!("Expected Operation expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_virtual_call_read_gpio() {
+        let src = r#"
+            fn main() {
+                let x = READ(GPIO(5));
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_virtual_call_pwm() {
+        let src = r#"
+            fn main() {
+                START(PWM(0));
+                SET_DUTY_CYCLE(PWM(0), 128);
+                STOP(PWM(0));
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_virtual_call_with_variable_target() {
+        let src = r#"
+            fn main() {
+                let pin = 13;
+                WRITE(GPIO(pin), 1);
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_virtual_call_uart() {
+        let src = r#"
+            fn main() {
+                INIT(UART(0));
+                SET_BAUD_RATE(UART(0), 9600);
+                WRITE(UART(0), 65);
+                let byte = READ(UART(0));
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parse_virtual_call_watchdog() {
+        let src = r#"
+            fn main() {
+                ENABLE(WDT());
+                RESET(WDT());
+                DISABLE(WDT());
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
     }
 }

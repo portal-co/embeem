@@ -91,9 +91,9 @@ fn main() {
             
             // If more than 4 flags, there might be an issue
             if flags > 4 {
-                GPIO_WRITE(13, 1);  // Warning LED
+                WRITE(GPIO(13), 1);  // Warning LED
             } else {
-                GPIO_WRITE(13, 0);
+                WRITE(GPIO(13), 0);
             }
             
             DELAY_MS(100);

@@ -23,12 +23,12 @@ The classic embedded "Hello World"—blinking an LED:
 
 ```embeem
 fn main() {
-    GPIO_SET_MODE(13, OUTPUT);
+    SET_MODE(GPIO(13), OUTPUT);
     
     repeat 10 {
-        GPIO_WRITE(13, HIGH);
+        WRITE(GPIO(13), HIGH);
         DELAY_MS(500);
-        GPIO_WRITE(13, LOW);
+        WRITE(GPIO(13), LOW);
         DELAY_MS(500);
     }
 }
@@ -40,12 +40,12 @@ This program blinks an LED on pin 13 exactly 10 times, then exits.
 
 ```embeem
 fn main() {
-    let reading = ADC_READ(0);
+    let reading = READ(ADC(0));
     
     if reading > 512 {
-        GPIO_WRITE(LED_PIN, HIGH);
+        WRITE(GPIO(LED_PIN), HIGH);
     } else {
-        GPIO_WRITE(LED_PIN, LOW);
+        WRITE(GPIO(LED_PIN), LOW);
     }
 }
 ```
@@ -78,7 +78,67 @@ let result = {
 
 ### Operations
 
-Embeem provides direct access to microcontroller operations:
+Embeem provides direct access to microcontroller operations using a virtual function call syntax:
+
+```embeem
+// GPIO operations
+WRITE(GPIO(pin), value);      // Write to a pin
+let state = READ(GPIO(pin));  // Read from a pin
+TOGGLE(GPIO(pin));            // Toggle a pin
+SET_MODE(GPIO(pin), mode);    // Set pin mode
+
+// ADC operations
+let value = READ(ADC(channel));        // Read analog value
+SET_RESOLUTION(ADC(channel), bits);    // Set ADC resolution
+
+// PWM operations
+START(PWM(channel));                       // Start PWM
+STOP(PWM(channel));                        // Stop PWM
+SET_DUTY_CYCLE(PWM(channel), duty);        // Set duty cycle
+SET_FREQUENCY(PWM(channel), freq);         // Set frequency
+
+// Communication
+INIT(UART(0));                        // Initialize UART
+WRITE(UART(0), data);                 // Write to UART
+let received = READ(UART(0));         // Read from UART
+SET_BAUD_RATE(UART(0), 9600);         // Set baud rate
+
+INIT(SPI(0));                         // Initialize SPI
+let result = TRANSFER(SPI(0), data);  // SPI transfer
+
+INIT(I2C(0));                         // Initialize I2C
+START(I2C(0));                        // I2C start condition
+STOP(I2C(0));                         // I2C stop condition
+
+// Timer operations
+START(TIMER(0));                      // Start timer
+STOP(TIMER(0));                       // Stop timer
+RESET(TIMER(0));                      // Reset timer
+let time = READ(TIMER(0));            // Read timer value
+
+// Watchdog operations
+ENABLE(WDT());                        // Enable watchdog
+DISABLE(WDT());                       // Disable watchdog
+RESET(WDT());                         // Feed the watchdog
+SET_TIMEOUT(WDT(), timeout);          // Set timeout
+```
+
+The virtual function call syntax separates the **target** (like `GPIO(pin)`) from the **operation** (like `WRITE`), making code more readable and consistent across different peripherals.
+
+#### Traditional Syntax
+
+Embeem also supports traditional operation syntax for direct access:
+
+```embeem
+// These are equivalent:
+WRITE(GPIO(13), 1);     // Virtual function syntax
+GPIO_WRITE(13, 1);      // Traditional syntax
+
+READ(ADC(0));           // Virtual function syntax
+ADC_READ(0);            // Traditional syntax
+```
+
+#### Arithmetic and Bitwise Operations
 
 ```embeem
 // Arithmetic
@@ -92,17 +152,6 @@ let shifted = SHL(value, 4);
 // Comparisons
 let is_equal = EQ(a, b);
 let is_less = LT(a, b);
-
-// GPIO
-GPIO_WRITE(pin, value);
-let state = GPIO_READ(pin);
-
-// PWM
-PWM_SET_DUTY_CYCLE(channel, 128);
-
-// Communication
-UART_WRITE_BYTE(0, data);
-let received = SPI_TRANSFER(0, command);
 ```
 
 ## Control Flow
@@ -243,7 +292,7 @@ fn debounced_read(pin: u8) -> bool {
     let mut count = 0;
     
     for i in 0 to 9 {
-        if GPIO_READ(pin) == HIGH {
+        if READ(GPIO(pin)) == HIGH {
             count = count + 1;
         }
         DELAY_MS(1);
@@ -259,13 +308,13 @@ fn debounced_read(pin: u8) -> bool {
 fn fade_led(channel: u8) {
     // Fade up
     for brightness in 0 to 255 {
-        PWM_SET_DUTY_CYCLE(channel, brightness);
+        SET_DUTY_CYCLE(PWM(channel), brightness);
         DELAY_MS(10);
     }
     
     // Fade down
     for brightness in 255 downto 0 {
-        PWM_SET_DUTY_CYCLE(channel, brightness);
+        SET_DUTY_CYCLE(PWM(channel), brightness);
         DELAY_MS(10);
     }
 }
@@ -306,7 +355,7 @@ fn main() {
     let mut state: u8 = STATE_IDLE;
     
     repeat 1000 {
-        let input = UART_READ_BYTE(0);
+        let input = READ(UART(0));
         state = process_state(state, input);
         DELAY_MS(10);
     }
@@ -321,7 +370,7 @@ fn read_averaged(channel: u8, samples: u8) -> u16 {
     
     for i in 0 to 15 {  // Max 16 samples
         if i < samples {
-            sum = sum + ADC_READ(channel);
+            sum = sum + READ(ADC(channel));
             DELAY_US(100);
         }
     }
@@ -340,7 +389,7 @@ Before writing a loop, ask: "What's the maximum number of iterations?"
 // Bad thinking: "loop until data arrives"
 // Good thinking: "loop at most 1000 times waiting for data"
 
-while UART_AVAILABLE(0) == 0 max 1000 {
+while AVAILABLE(UART(0)) == 0 max 1000 {
     DELAY_MS(1);
 }
 ```
@@ -402,7 +451,7 @@ const ERR_INVALID: u8 = 2;
 fn read_with_timeout(channel: u8) -> (u8, u16) {
     let mut attempts = 0;
     
-    while UART_AVAILABLE(channel) == 0 max 100 {
+    while AVAILABLE(UART(channel)) == 0 max 100 {
         attempts = attempts + 1;
         DELAY_MS(10);
     }
@@ -410,7 +459,7 @@ fn read_with_timeout(channel: u8) -> (u8, u16) {
     if attempts >= 100 {
         (ERR_TIMEOUT, 0)
     } else {
-        (OK, UART_READ_BYTE(channel))
+        (OK, READ(UART(channel)))
     }
 }
 ```

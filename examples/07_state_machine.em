@@ -19,9 +19,9 @@ const YELLOW_LED: u8 = 11;
 const GREEN_LED: u8 = 12;
 
 fn set_lights(red: u8, yellow: u8, green: u8) {
-    GPIO_WRITE(RED_LED, red);
-    GPIO_WRITE(YELLOW_LED, yellow);
-    GPIO_WRITE(GREEN_LED, green);
+    WRITE(GPIO(RED_LED), red);
+    WRITE(GPIO(YELLOW_LED), yellow);
+    WRITE(GPIO(GREEN_LED), green);
 }
 
 fn get_state_duration(state: u8) -> u16 {
@@ -62,9 +62,9 @@ fn apply_state(state: u8) {
 
 fn main() {
     // Initialize LED pins
-    GPIO_SET_MODE(RED_LED, 1);
-    GPIO_SET_MODE(YELLOW_LED, 1);
-    GPIO_SET_MODE(GREEN_LED, 1);
+    SET_MODE(GPIO(RED_LED), 1);
+    SET_MODE(GPIO(YELLOW_LED), 1);
+    SET_MODE(GPIO(GREEN_LED), 1);
     
     let mut state: u8 = STATE_RED;
     let mut timer: u16 = 0;

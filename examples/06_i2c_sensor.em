@@ -7,7 +7,7 @@ const TEMP_REG: u8 = 0x00;
 
 fn read_temperature() -> i16 {
     // Start I2C transaction
-    I2C_START(I2C_NUM);
+    START(I2C(I2C_NUM));
     
     // Write register address
     I2C_WRITE_TO(I2C_NUM, SENSOR_ADDR, TEMP_REG);
@@ -16,7 +16,7 @@ fn read_temperature() -> i16 {
     let high = I2C_READ_FROM(I2C_NUM, SENSOR_ADDR);
     let low = I2C_READ_FROM(I2C_NUM, SENSOR_ADDR);
     
-    I2C_STOP(I2C_NUM);
+    STOP(I2C(I2C_NUM));
     
     // Combine bytes and convert to temperature
     // TMP102 format: 12 bits, MSB first, 0.0625°C per bit
@@ -30,11 +30,11 @@ fn read_temperature() -> i16 {
 
 fn main() {
     // Initialize I2C
-    I2C_INIT(I2C_NUM);
-    I2C_SET_CLOCK(I2C_NUM, 100000);  // 100kHz standard mode
+    INIT(I2C(I2C_NUM));
+    SET_CLOCK(I2C(I2C_NUM), 100000);  // 100kHz standard mode
     
     // Setup LED indicator
-    GPIO_SET_MODE(13, 1);
+    SET_MODE(GPIO(13), 1);
     
     // Read temperature 100 times
     repeat 100 {
@@ -42,9 +42,9 @@ fn main() {
         
         // LED on if temp > 25.0°C (250 in 0.1°C units)
         if temp > 250 {
-            GPIO_WRITE(13, 1);
+            WRITE(GPIO(13), 1);
         } else {
-            GPIO_WRITE(13, 0);
+            WRITE(GPIO(13), 0);
         }
         
         DELAY_MS(1000);  // Read once per second

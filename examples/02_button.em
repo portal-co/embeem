@@ -9,18 +9,18 @@ const PULLUP: u8 = 2;
 
 fn main() {
     // Configure pins
-    GPIO_SET_MODE(BUTTON_PIN, PULLUP);  // Button with pull-up
-    GPIO_SET_MODE(LED_PIN, OUTPUT);
+    SET_MODE(GPIO(BUTTON_PIN), PULLUP);  // Button with pull-up
+    SET_MODE(GPIO(LED_PIN), OUTPUT);
     
     // Main loop - runs for 1000 iterations
     repeat 1000 {
-        let button_state = GPIO_READ(BUTTON_PIN);
+        let button_state = READ(GPIO(BUTTON_PIN));
         
         // Button is active LOW (pulled up, grounded when pressed)
         if button_state == 0 {
-            GPIO_WRITE(LED_PIN, 1);
+            WRITE(GPIO(LED_PIN), 1);
         } else {
-            GPIO_WRITE(LED_PIN, 0);
+            WRITE(GPIO(LED_PIN), 0);
         }
         
         DELAY_MS(10);  // Debounce delay

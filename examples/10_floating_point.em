@@ -45,7 +45,7 @@ fn normalize_angle(angle: f32) -> f32 {
 
 fn main() {
     // Initialize ADC for sensor input
-    ADC_SET_RESOLUTION(12);  // 12-bit for better precision
+    SET_RESOLUTION(ADC(0), 12);  // 12-bit for better precision
     
     // Buffer for samples
     let mut samples: [f32; 16] = [0.0; 16];
@@ -55,7 +55,7 @@ fn main() {
     // Main processing loop
     repeat 1000 {
         // Read raw ADC value and convert to voltage (0-3.3V)
-        let raw = ADC_READ(0);
+        let raw = READ(ADC(0));
         let voltage: f32 = FDIV(FMUL(raw as f32, 3.3), 4095.0);
         
         // Apply low-pass filter
@@ -72,7 +72,7 @@ fn main() {
             // Output RMS as PWM duty cycle (assuming 0-3.3V range)
             let duty = FMUL(FDIV(rms, 3.3), 255.0);
             let duty_int: u8 = if duty > 255.0 { 255 } else { duty as u8 };
-            PWM_SET_DUTY_CYCLE(0, duty_int);
+            SET_DUTY_CYCLE(PWM(0), duty_int);
         }
         
         DELAY_US(100);  // 10kHz sample rate

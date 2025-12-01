@@ -486,6 +486,118 @@ See the complete emback operations documentation for:
 - Power Management Operations
 - RTC Operations
 
+### 7.14 Virtual Function Call Syntax
+
+Embeem supports a "virtual function call" syntax that allows expressing operations in a more object-oriented style. This syntax separates the **target** (the peripheral or resource) from the **operation** being performed.
+
+#### 7.14.1 Syntax
+
+```
+VIRTUAL_CALL ::= OP_NAME '(' TARGET '(' TARGET_ARGS ')' (',' EXPR)* ')'
+TARGET       ::= 'GPIO' | 'ADC' | 'DAC' | 'PWM' | 'TIMER' | 'UART' | 'SPI' | 'I2C' | 'CAN' | 'USB' | 'DMA' | 'WDT' | 'EEPROM' | 'FLASH' | 'RTC'
+```
+
+#### 7.14.2 Target Types
+
+| Target | Description | Target Arguments |
+|--------|-------------|------------------|
+| `GPIO` | General Purpose I/O | `GPIO(pin)` |
+| `ADC` | Analog-to-Digital Converter | `ADC(channel)` |
+| `DAC` | Digital-to-Analog Converter | `DAC(channel)` |
+| `PWM` | Pulse Width Modulation | `PWM(channel)` |
+| `TIMER` | Hardware Timer | `TIMER(timer_num)` |
+| `UART` | Serial Communication | `UART(uart_num)` |
+| `SPI` | Serial Peripheral Interface | `SPI(spi_num)` |
+| `I2C` | Inter-Integrated Circuit | `I2C(i2c_num)` |
+| `CAN` | Controller Area Network | `CAN(can_num)` |
+| `USB` | Universal Serial Bus | `USB(usb_num)` |
+| `DMA` | Direct Memory Access | `DMA(dma_num)` |
+| `WDT` | Watchdog Timer | `WDT()` |
+| `EEPROM` | EEPROM Memory | `EEPROM(addr)` |
+| `FLASH` | Flash Memory | `FLASH(addr)` |
+| `RTC` | Real-Time Clock | `RTC(rtc_num)` |
+
+#### 7.14.3 Virtual Operations
+
+| Operation | Description | Example |
+|-----------|-------------|---------|
+| `READ` | Read from target | `READ(GPIO(13))`, `READ(ADC(0))` |
+| `WRITE` | Write to target | `WRITE(GPIO(13), 1)`, `WRITE(DAC(0), 128)` |
+| `INIT` | Initialize target | `INIT(UART(0))`, `INIT(I2C(0))` |
+| `START` | Start target | `START(PWM(0))`, `START(TIMER(0))` |
+| `STOP` | Stop target | `STOP(PWM(0))`, `STOP(TIMER(0))` |
+| `RESET` | Reset target | `RESET(TIMER(0))`, `RESET(WDT())` |
+| `TOGGLE` | Toggle target state | `TOGGLE(GPIO(13))` |
+| `SET_MODE` | Set operation mode | `SET_MODE(GPIO(13), 1)` |
+| `SET_FREQUENCY` | Set frequency | `SET_FREQUENCY(PWM(0), 1000)` |
+| `SET_DUTY_CYCLE` | Set PWM duty cycle | `SET_DUTY_CYCLE(PWM(0), 128)` |
+| `SET_CLOCK` | Set clock speed | `SET_CLOCK(I2C(0), 100000)` |
+| `SET_BAUD_RATE` | Set baud rate | `SET_BAUD_RATE(UART(0), 9600)` |
+| `TRANSFER` | Transfer data | `TRANSFER(SPI(0), data)` |
+| `AVAILABLE` | Check data available | `AVAILABLE(UART(0))` |
+| `FLUSH` | Flush buffers | `FLUSH(UART(0))` |
+| `ENABLE` | Enable target | `ENABLE(WDT())` |
+| `DISABLE` | Disable target | `DISABLE(WDT())` |
+
+#### 7.14.4 Equivalence to Traditional Syntax
+
+The virtual function call syntax is syntactic sugar that desugars to the traditional operation syntax:
+
+| Virtual Syntax | Traditional Syntax |
+|----------------|-------------------|
+| `READ(GPIO(13))` | `GPIO_READ(13)` |
+| `WRITE(GPIO(13), 1)` | `GPIO_WRITE(13, 1)` |
+| `TOGGLE(GPIO(13))` | `GPIO_TOGGLE(13)` |
+| `SET_MODE(GPIO(13), 1)` | `GPIO_SET_MODE(13, 1)` |
+| `READ(ADC(0))` | `ADC_READ(0)` |
+| `WRITE(DAC(0), 128)` | `DAC_WRITE(0, 128)` |
+| `START(PWM(0))` | `PWM_START(0)` |
+| `STOP(PWM(0))` | `PWM_STOP(0)` |
+| `SET_DUTY_CYCLE(PWM(0), 128)` | `PWM_SET_DUTY_CYCLE(0, 128)` |
+| `SET_FREQUENCY(PWM(0), 1000)` | `PWM_SET_FREQUENCY(0, 1000)` |
+| `START(TIMER(0))` | `TIMER_START(0)` |
+| `STOP(TIMER(0))` | `TIMER_STOP(0)` |
+| `RESET(TIMER(0))` | `TIMER_RESET(0)` |
+| `READ(TIMER(0))` | `TIMER_READ(0)` |
+| `INIT(UART(0))` | `UART_INIT(0)` |
+| `WRITE(UART(0), byte)` | `UART_WRITE_BYTE(0, byte)` |
+| `READ(UART(0))` | `UART_READ_BYTE(0)` |
+| `AVAILABLE(UART(0))` | `UART_AVAILABLE(0)` |
+| `FLUSH(UART(0))` | `UART_FLUSH(0)` |
+| `SET_BAUD_RATE(UART(0), 9600)` | `UART_SET_BAUD_RATE(0, 9600)` |
+| `INIT(SPI(0))` | `SPI_INIT(0)` |
+| `TRANSFER(SPI(0), data)` | `SPI_TRANSFER(0, data)` |
+| `INIT(I2C(0))` | `I2C_INIT(0)` |
+| `START(I2C(0))` | `I2C_START(0)` |
+| `STOP(I2C(0))` | `I2C_STOP(0)` |
+| `SET_CLOCK(I2C(0), 100000)` | `I2C_SET_CLOCK(0, 100000)` |
+| `ENABLE(WDT())` | `WDT_ENABLE()` |
+| `DISABLE(WDT())` | `WDT_DISABLE()` |
+| `RESET(WDT())` | `WDT_RESET()` |
+
+#### 7.14.5 Benefits
+
+1. **Readability**: The target is clearly separated from the operation
+2. **Consistency**: Same operation name (`READ`, `WRITE`) works across different peripherals
+3. **Discoverability**: Easier to find related operations for a peripheral
+4. **Extensibility**: New peripherals can reuse standard operation names
+
+**Example Program:**
+```embeem
+fn main() {
+    // Configure pin as output
+    SET_MODE(GPIO(13), 1);
+    
+    // Blink 10 times
+    repeat 10 {
+        WRITE(GPIO(13), 1);
+        DELAY_MS(500);
+        WRITE(GPIO(13), 0);
+        DELAY_MS(500);
+    }
+}
+```
+
 ---
 
 ## 8. Program Structure
@@ -597,9 +709,19 @@ shift_expr  = add_expr { shift_op add_expr } ;
 add_expr    = mul_expr { add_op mul_expr } ;
 mul_expr    = unary_expr { mul_op unary_expr } ;
 unary_expr  = unary_op unary_expr | primary ;
-primary     = IDENT | literal | "(" expr ")" | op_call | if_expr | block ;
+primary     = IDENT | literal | "(" expr ")" | op_call | virtual_call | if_expr | block ;
 if_expr     = "if" expr block "else" block ;
 op_call     = OP_NAME "(" [ expr { "," expr } ] ")" ;
+virtual_call = VIRTUAL_OP "(" TARGET "(" [ expr { "," expr } ] ")" { "," expr } ")" ;
+
+(* Virtual function call components *)
+VIRTUAL_OP  = "READ" | "WRITE" | "INIT" | "START" | "STOP" | "RESET" | "TOGGLE"
+            | "SET_MODE" | "SET_FREQUENCY" | "SET_DUTY_CYCLE" | "SET_CLOCK"
+            | "SET_BAUD_RATE" | "TRANSFER" | "AVAILABLE" | "FLUSH"
+            | "ENABLE" | "DISABLE" | "SET_TIMEOUT" | "SET_PERIOD" | "SET_COMPARE"
+            | "SET_RESOLUTION" | "SET_REFERENCE" | "SET_PULSE_WIDTH" ;
+TARGET      = "GPIO" | "ADC" | "DAC" | "PWM" | "TIMER" | "UART" | "SPI" | "I2C"
+            | "CAN" | "USB" | "DMA" | "WDT" | "EEPROM" | "FLASH" | "RTC" ;
 
 (* Operators *)
 comp_op     = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
