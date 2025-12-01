@@ -1,0 +1,20 @@
+[package]
+name = "embeem-codegen"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "C code generator for the Embeem total programming language"
+repository.workspace = true
+
+[dependencies]
+embeem-ast = { path = "../embeem-ast", features = ["inference"] }
+
+[dev-dependencies]
+embeem-parser = { path = "../embeem-parser" }
+
+[features]
+default = ["alloc"]
+alloc = ["embeem-ast/alloc"]
+
+[lints.rust]
+unsafe_code = "forbid"

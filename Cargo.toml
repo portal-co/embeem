@@ -1,6 +1,10 @@
 [workspace]
-members=[]
-resolver="3"
+members = [
+    "crates/embeem-ast",
+    "crates/embeem-parser",
+    "crates/embeem-codegen",
+]
+resolver = "3"
 
 [workspace.package]
 license = "CC0-1.0"

@@ -1,0 +1,18 @@
+[package]
+name = "embeem-parser"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "Parser for the Embeem total programming language"
+repository.workspace = true
+
+[dependencies]
+embeem-ast = { path = "../embeem-ast" }
+nom.workspace = true
+
+[features]
+default = ["alloc"]
+alloc = ["embeem-ast/alloc", "nom/alloc"]
+
+[lints.rust]
+unsafe_code = "forbid"
