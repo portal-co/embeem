@@ -7,7 +7,7 @@ description = "C code generator for the Embeem total programming language"
 repository.workspace = true
 
 [dependencies]
-embeem-ast = { path = "../embeem-ast" }
+embeem-ast = { path = "../embeem-ast", features = ["inference"] }
 
 [dev-dependencies]
 embeem-parser = { path = "../embeem-parser" }

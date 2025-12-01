@@ -16,9 +16,15 @@ mod expr;
 #[cfg(feature = "alloc")]
 mod ops;
 
+#[cfg(all(feature = "alloc", feature = "inference"))]
+mod infer;
+
 #[cfg(feature = "alloc")]
 pub use ast::*;
 #[cfg(feature = "alloc")]
 pub use expr::Expr;
 #[cfg(feature = "alloc")]
 pub use ops::*;
+
+#[cfg(all(feature = "alloc", feature = "inference"))]
+pub use infer::*;

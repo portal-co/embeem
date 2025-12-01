@@ -6,7 +6,8 @@ use alloc::vec::Vec;
 
 use embeem_ast::{
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal, OpKind,
-    PrimitiveType, Program, RangeDirection, Statement, Type, UnaryOp,
+    PrimitiveType, Program, RangeDirection, Statement, Type, TypeContext, UnaryOp,
+    infer_expression_type,
 };
 
 /// Code generation error.
@@ -52,6 +53,7 @@ pub struct CCodegen {
     indent: usize,
     temp_counter: usize,
     options: CodegenOptions,
+    type_ctx: TypeContext,
 }
 
 impl CCodegen {
@@ -67,12 +69,14 @@ impl CCodegen {
             indent: 0,
             temp_counter: 0,
             options,
+            type_ctx: TypeContext::new(),
         }
     }
 
     /// Generate C code from an Embeem program.
     pub fn generate(&mut self, program: &Program) -> Result<String, CodegenError> {
         self.output.clear();
+        self.type_ctx = TypeContext::from_program(program);
         self.temp_counter = 0;
 
         // Generate header
@@ -147,6 +151,12 @@ impl CCodegen {
     }
 
     fn emit_function(&mut self, function: &Function) -> Result<(), CodegenError> {
+        // Save the current type context and add function parameters
+        let saved_ctx = self.type_ctx.clone();
+        for param in &function.params {
+            self.type_ctx.add_variable(param.name.clone(), param.ty.clone());
+        }
+
         let return_type = match &function.return_type {
             Some(ty) => self.type_to_c(ty),
             None => "void".to_string(),
@@ -172,6 +182,9 @@ impl CCodegen {
 
         self.indent -= 1;
         self.emit_line("}");
+
+        // Restore the type context
+        self.type_ctx = saved_ctx;
         Ok(())
     }
 
@@ -201,10 +214,18 @@ impl CCodegen {
                 ty,
                 value,
             } => {
-                let c_type = ty
+                // Use explicit type if provided, otherwise infer the type
+                let inferred_ty = ty.as_ref().cloned().or_else(|| infer_expression_type(value, &self.type_ctx));
+                let c_type = inferred_ty
                     .as_ref()
                     .map(|t| self.type_to_c(t))
                     .unwrap_or_else(|| "uint64_t".to_string());
+                
+                // Add the variable to the type context for future inference
+                if let Some(var_ty) = inferred_ty {
+                    self.type_ctx.add_variable(name.clone(), var_ty);
+                }
+                
                 let expr = self.expr_to_c(value)?;
                 self.emit_line(&format!("{} {} = {};", c_type, name, expr));
             }
@@ -1102,5 +1123,56 @@ mod tests {
         let c_code = compile_to_c(&program).unwrap();
         assert!(c_code.contains("?"), "Expected ternary operator '?', got:\n{}", c_code);
         assert!(c_code.contains(":"));
+    }
+
+    #[test]
+    fn test_type_inference_for_let() {
+        // Test that type inference works for let statements without explicit types
+        let src = r#"
+            fn main() {
+                let x = 42;
+                let y = true;
+                let z = 3.14;
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        // x should be inferred as uint64_t (integer literal)
+        assert!(c_code.contains("uint64_t x = "), "Expected uint64_t for integer literal, got:\n{}", c_code);
+        // y should be inferred as bool
+        assert!(c_code.contains("bool y = "), "Expected bool for boolean literal, got:\n{}", c_code);
+        // z should be inferred as double (float literal)
+        assert!(c_code.contains("double z = "), "Expected double for float literal, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_type_inference_comparison() {
+        // Test that comparison results are inferred as bool
+        let src = r#"
+            fn test() {
+                let x: u32 = 10;
+                let y: u32 = 5;
+                let is_greater = x > y;
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        // is_greater should be inferred as bool
+        assert!(c_code.contains("bool is_greater = "), "Expected bool for comparison result, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_type_inference_from_variable() {
+        // Test that a variable's type is inferred from another variable
+        let src = r#"
+            fn test() {
+                let x: u16 = 100;
+                let y = x;
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        // y should be inferred as uint16_t from x
+        assert!(c_code.contains("uint16_t y = "), "Expected uint16_t for variable reference, got:\n{}", c_code);
     }
 }
