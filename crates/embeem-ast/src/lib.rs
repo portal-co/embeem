@@ -2,6 +2,13 @@
 //!
 //! This crate provides the abstract syntax tree representation for Embeem programs,
 //! including the core `Expr` type that is used for desugared representations.
+//!
+//! # Identifier Naming Conventions
+//!
+//! UPPER_SNAKE_CASE identifiers are reserved exclusively for operations. User-defined
+//! identifiers (variables, functions, constants) must not use this pattern.
+//!
+//! See [`is_upper_snake_case`] and [`is_valid_user_identifier`] for validation functions.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -24,7 +31,7 @@ pub use ast::*;
 #[cfg(feature = "alloc")]
 pub use expr::Expr;
 #[cfg(feature = "alloc")]
-pub use ops::*;
+pub use ops::{is_upper_snake_case, is_valid_user_identifier, *};
 
 #[cfg(all(feature = "alloc", feature = "inference"))]
 pub use infer::*;

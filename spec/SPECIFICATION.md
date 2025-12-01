@@ -48,6 +48,40 @@ IDENTIFIER  ::= [a-zA-Z_][a-zA-Z0-9_]*
 
 Reserved keywords cannot be used as identifiers.
 
+#### 2.1.1 Identifier Naming Conventions
+
+**UPPER_SNAKE_CASE is reserved exclusively for operations.**
+
+Identifiers matching the pattern `[A-Z][A-Z0-9_]*` (starting with uppercase letter, containing only uppercase letters, digits, and underscores) are reserved for the operation namespace and **cannot** be used as:
+- Variable names
+- Function names  
+- Constant names
+- Type names
+- Parameter names
+
+This ensures:
+1. Future operations can be added without breaking existing programs
+2. Operations are visually distinct from user-defined identifiers
+3. The parser can unambiguously distinguish operations from function calls
+
+**Valid user identifiers:**
+```embeem
+let x = 1;              // lowercase
+let myVariable = 2;     // camelCase
+let my_variable = 3;    // snake_case
+let MyType = 4;         // PascalCase
+let _private = 5;       // leading underscore
+let x1 = 6;             // with digits
+```
+
+**Invalid user identifiers (reserved for operations):**
+```embeem
+let GPIO = 1;           // ERROR: UPPER_SNAKE_CASE
+let MY_CONST = 2;       // ERROR: UPPER_SNAKE_CASE  
+let ADC_CHANNEL = 3;    // ERROR: UPPER_SNAKE_CASE
+let X = 4;              // ERROR: single uppercase letter
+```
+
 ### 2.2 Keywords
 
 ```

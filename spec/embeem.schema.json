@@ -3,13 +3,25 @@
   "$id": "https://github.com/portal-co/emback/embeem/schema/v1",
   "title": "Embeem Language Schema",
   "description": "Machine-readable specification for the Embeem total programming language",
-  "version": "1.0.0",
+  "version": "0.1.0",
   
   "definitions": {
     "identifier": {
       "type": "string",
       "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
-      "description": "A valid Embeem identifier"
+      "description": "A valid Embeem identifier (includes both user and operation identifiers)"
+    },
+    
+    "userIdentifier": {
+      "type": "string",
+      "pattern": "^(?![A-Z][A-Z0-9_]*$)[a-zA-Z_][a-zA-Z0-9_]*$",
+      "description": "A valid user-defined identifier. UPPER_SNAKE_CASE is reserved for operations and cannot be used for variables, functions, constants, or parameters."
+    },
+    
+    "operationIdentifier": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "description": "An UPPER_SNAKE_CASE identifier reserved exclusively for operations"
     },
     
     "integerLiteral": {
@@ -170,7 +182,7 @@
       "type": "object",
       "properties": {
         "kind": { "const": "call" },
-        "function": { "$ref": "#/definitions/identifier" },
+        "function": { "$ref": "#/definitions/userIdentifier" },
         "arguments": {
           "type": "array",
           "items": { "$ref": "#/definitions/expression" }
@@ -205,19 +217,20 @@
       "type": "object",
       "properties": {
         "kind": { "const": "let" },
-        "name": { "$ref": "#/definitions/identifier" },
+        "name": { "$ref": "#/definitions/userIdentifier" },
         "mutable": { "type": "boolean", "default": false },
         "type": { "$ref": "#/definitions/type" },
         "value": { "$ref": "#/definitions/expression" }
       },
-      "required": ["kind", "name", "value"]
+      "required": ["kind", "name", "value"],
+      "description": "Variable names must not use UPPER_SNAKE_CASE (reserved for operations)"
     },
     
     "assignStatement": {
       "type": "object",
       "properties": {
         "kind": { "const": "assign" },
-        "target": { "$ref": "#/definitions/identifier" },
+        "target": { "$ref": "#/definitions/userIdentifier" },
         "value": { "$ref": "#/definitions/expression" }
       },
       "required": ["kind", "target", "value"]
@@ -253,14 +266,14 @@
       "type": "object",
       "properties": {
         "kind": { "const": "for" },
-        "variable": { "$ref": "#/definitions/identifier" },
+        "variable": { "$ref": "#/definitions/userIdentifier" },
         "start": { "$ref": "#/definitions/expression" },
         "end": { "$ref": "#/definitions/expression" },
         "direction": { "enum": ["to", "downto"] },
         "body": { "$ref": "#/definitions/block" }
       },
       "required": ["kind", "variable", "start", "end", "direction", "body"],
-      "description": "Loop bounds must be compile-time constants for totality"
+      "description": "Loop bounds must be compile-time constants for totality. Loop variable must not use UPPER_SNAKE_CASE."
     },
     
     "repeatStatement": {
@@ -301,13 +314,13 @@
     "function": {
       "type": "object",
       "properties": {
-        "name": { "$ref": "#/definitions/identifier" },
+        "name": { "$ref": "#/definitions/userIdentifier" },
         "parameters": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "name": { "$ref": "#/definitions/identifier" },
+              "name": { "$ref": "#/definitions/userIdentifier" },
               "type": { "$ref": "#/definitions/type" }
             },
             "required": ["name", "type"]
@@ -316,18 +329,20 @@
         "returnType": { "$ref": "#/definitions/type" },
         "body": { "$ref": "#/definitions/block" }
       },
-      "required": ["name", "parameters", "body"]
+      "required": ["name", "parameters", "body"],
+      "description": "Function and parameter names must not use UPPER_SNAKE_CASE (reserved for operations)"
     },
     
     "constDecl": {
       "type": "object",
       "properties": {
         "kind": { "const": "const" },
-        "name": { "$ref": "#/definitions/identifier" },
+        "name": { "$ref": "#/definitions/userIdentifier" },
         "type": { "$ref": "#/definitions/type" },
         "value": { "$ref": "#/definitions/expression" }
       },
-      "required": ["kind", "name", "type", "value"]
+      "required": ["kind", "name", "type", "value"],
+      "description": "Constant names must not use UPPER_SNAKE_CASE (reserved for operations)"
     },
     
     "operationName": {
@@ -482,7 +497,28 @@
         "description": "all primitive operations terminate",
         "applies_to": "operationExpr",
         "constraint": "all ops in operationName are total"
+      },
+      {
+        "id": "reserved-upper-snake-case",
+        "description": "UPPER_SNAKE_CASE identifiers are reserved for operations",
+        "applies_to": "userIdentifier",
+        "constraint": "identifiers matching ^[A-Z][A-Z0-9_]*$ cannot be used for variables, functions, constants, or parameters"
       }
     ]
+  },
+  
+  "namingConventions": {
+    "description": "Identifier naming conventions for Embeem",
+    "operations": {
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "description": "Operations use UPPER_SNAKE_CASE exclusively",
+      "examples": ["GPIO_READ", "ADC_SET_RESOLUTION", "DELAY_MS", "I2C_INIT"]
+    },
+    "userIdentifiers": {
+      "pattern": "^(?![A-Z][A-Z0-9_]*$)[a-zA-Z_][a-zA-Z0-9_]*$",
+      "description": "User-defined identifiers must not use UPPER_SNAKE_CASE",
+      "validExamples": ["x", "myVariable", "my_variable", "MyType", "_private"],
+      "invalidExamples": ["GPIO", "MY_CONST", "ADC_CHANNEL"]
+    }
   }
 }

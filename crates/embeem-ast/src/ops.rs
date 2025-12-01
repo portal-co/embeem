@@ -1,6 +1,73 @@
 //! Operations available in Embeem.
+//!
+//! All operation names follow UPPER_SNAKE_CASE convention. This naming pattern
+//! is reserved exclusively for operations and cannot be used for user-defined
+//! identifiers (variables, functions, constants, etc.).
 
 use alloc::vec::Vec;
+
+/// Check if an identifier follows UPPER_SNAKE_CASE pattern.
+///
+/// UPPER_SNAKE_CASE identifiers are reserved for operations and cannot be used
+/// as user-defined names (variables, functions, constants, etc.).
+///
+/// Pattern: starts with [A-Z], contains only [A-Z0-9_]
+///
+/// # Examples
+/// ```
+/// use embeem_ast::is_upper_snake_case;
+///
+/// assert!(is_upper_snake_case("GPIO_READ"));
+/// assert!(is_upper_snake_case("ADC_SET_RESOLUTION"));
+/// assert!(is_upper_snake_case("NOP"));
+/// assert!(is_upper_snake_case("I2C_INIT"));
+///
+/// assert!(!is_upper_snake_case("gpio_read"));
+/// assert!(!is_upper_snake_case("GpioRead"));
+/// assert!(!is_upper_snake_case("myVariable"));
+/// assert!(!is_upper_snake_case("_PRIVATE"));
+/// ```
+pub fn is_upper_snake_case(s: &str) -> bool {
+    let mut chars = s.chars();
+    
+    // Must start with uppercase letter
+    match chars.next() {
+        Some(c) if c.is_ascii_uppercase() => {}
+        _ => return false,
+    }
+    
+    // Rest must be uppercase letters, digits, or underscores
+    for c in chars {
+        if !c.is_ascii_uppercase() && !c.is_ascii_digit() && c != '_' {
+            return false;
+        }
+    }
+    
+    true
+}
+
+/// Check if an identifier is valid for user-defined names.
+///
+/// User identifiers must NOT be UPPER_SNAKE_CASE (reserved for operations)
+/// and must not be a keyword.
+///
+/// # Examples
+/// ```
+/// use embeem_ast::is_valid_user_identifier;
+///
+/// assert!(is_valid_user_identifier("x"));
+/// assert!(is_valid_user_identifier("myVariable"));
+/// assert!(is_valid_user_identifier("my_variable"));
+/// assert!(is_valid_user_identifier("_private"));
+/// assert!(is_valid_user_identifier("MyType"));
+///
+/// assert!(!is_valid_user_identifier("GPIO_READ"));  // Reserved for operations
+/// assert!(!is_valid_user_identifier("MY_CONST"));   // UPPER_SNAKE_CASE
+/// ```
+pub fn is_valid_user_identifier(s: &str) -> bool {
+    // Must not be UPPER_SNAKE_CASE (reserved for operations)
+    !is_upper_snake_case(s)
+}
 
 /// All operations available in the Embeem language.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
