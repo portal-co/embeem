@@ -405,6 +405,12 @@ impl TsCodegen {
 
             Expression::Identifier(name) => Ok(name.clone()),
 
+            Expression::QualifiedIdentifier { namespace, name } => {
+                // For qualified identifiers (namespace::name), we emit JavaScript dot notation
+                // assuming the namespace has been resolved to a module object
+                Ok(format!("{}.{}", namespace, name))
+            }
+
             Expression::Binary { op, left, right } => {
                 let l = self.expr_to_ts(left)?;
                 let r = self.expr_to_ts(right)?;
@@ -476,6 +482,14 @@ impl TsCodegen {
                     mangle_function_name(function, &self.options.mangle_config)
                 };
                 Ok(format!("{}({})", name, arg_strs.join(", ")))
+            }
+
+            Expression::QualifiedCall { namespace, function, args } => {
+                let arg_strs: Result<Vec<_>, _> =
+                    args.iter().map(|a| self.expr_to_ts(a)).collect();
+                let arg_strs = arg_strs?;
+                // For qualified calls (namespace::function()), we emit JavaScript dot notation
+                Ok(format!("{}.{}({})", namespace, function, arg_strs.join(", ")))
             }
 
             Expression::Block(blk) => {

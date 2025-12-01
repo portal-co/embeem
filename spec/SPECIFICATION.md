@@ -1,6 +1,6 @@
 # Embeem Language Specification
 
-**Version:** 0.1.0  
+**Version:** 0.2.0  
 **Status:** Draft  
 **Last Updated:** 2025-12-01
 
@@ -14,8 +14,9 @@
 6. [Control Flow](#6-control-flow)
 7. [Operations](#7-operations)
 8. [Program Structure](#8-program-structure)
-9. [Semantics](#9-semantics)
-10. [Grammar](#10-grammar)
+9. [Module System](#9-module-system)
+10. [Semantics](#10-semantics)
+11. [Grammar](#11-grammar)
 
 ---
 
@@ -808,23 +809,299 @@ fn main() {
 
 ---
 
-## 9. Semantics
+## 9. Module System
 
-### 9.1 Evaluation Order
+Embeem uses an ESM-like module system with `import` and `export` statements. The module system is designed to preserve the property that functions form a directed acyclic graph (DAG)—no cyclic imports are allowed.
+
+### 9.1 Module Paths
+
+Module paths identify modules relative to the current file or from a project root.
+
+```
+MODULE_PATH ::= STRING
+              | IDENTIFIER ('/' IDENTIFIER)*
+```
+
+**Examples:**
+```embeem
+// Relative paths (start with ./ or ../)
+import { blink } from "./utils/gpio";
+import { helper } from "../common/helpers";
+
+// Package paths (resolved from project root or packages)
+import { sensor_read } from "drivers/bme280";
+```
+
+### 9.2 Exports
+
+Functions, constants, and external function declarations can be exported from a module.
+
+#### 9.2.1 Named Exports
+
+```
+EXPORT_DECL ::= 'export' FUNCTION
+              | 'export' CONST_DECL
+              | 'export' EXTERN_FN
+              | 'export' '{' EXPORT_LIST '}'
+```
+
+**Export a function:**
+```embeem
+export fn blink(pin: u8, times: u32) {
+    for i in 0 to times - 1 {
+        GPIO_TOGGLE(pin);
+        DELAY_MS(500);
+    }
+}
+```
+
+**Export a constant:**
+```embeem
+export const LED_PIN: u8 = 13;
+```
+
+**Export external function declaration:**
+```embeem
+export extern fn platform_init();
+```
+
+**Export multiple items:**
+```embeem
+fn helper1() { }
+fn helper2() { }
+const VALUE: u32 = 42;
+
+export { helper1, helper2, VALUE };
+```
+
+#### 9.2.2 Re-exports
+
+Modules can re-export items from other modules:
+
+```
+REEXPORT ::= 'export' '{' EXPORT_LIST '}' 'from' MODULE_PATH ';'
+           | 'export' '*' 'from' MODULE_PATH ';'
+           | 'export' '*' 'as' IDENTIFIER 'from' MODULE_PATH ';'
+```
+
+**Examples:**
+```embeem
+// Re-export specific items
+export { blink, LED_PIN } from "./gpio";
+
+// Re-export all exports
+export * from "./utils";
+
+// Re-export all as a namespace
+export * as gpio from "./gpio";
+```
+
+### 9.3 Imports
+
+#### 9.3.1 Named Imports
+
+```
+IMPORT_DECL ::= 'import' '{' IMPORT_LIST '}' 'from' MODULE_PATH ';'
+```
+
+**Examples:**
+```embeem
+import { blink, LED_PIN } from "./gpio";
+import { sensor_read, sensor_init } from "drivers/bme280";
+```
+
+#### 9.3.2 Aliased Imports
+
+```
+IMPORT_LIST ::= IMPORT_SPEC (',' IMPORT_SPEC)*
+IMPORT_SPEC ::= IDENTIFIER ('as' IDENTIFIER)?
+```
+
+**Examples:**
+```embeem
+import { blink as gpio_blink } from "./gpio";
+import { init as sensor_init, read as sensor_read } from "./sensor";
+```
+
+#### 9.3.3 Namespace Imports
+
+```
+NAMESPACE_IMPORT ::= 'import' '*' 'as' IDENTIFIER 'from' MODULE_PATH ';'
+```
+
+**Example:**
+```embeem
+import * as gpio from "./gpio";
+
+fn main() {
+    gpio::blink(gpio::LED_PIN, 5);
+}
+```
+
+#### 9.3.4 Side-effect Imports
+
+For modules that only have side effects (registration, initialization):
+
+```
+SIDE_EFFECT_IMPORT ::= 'import' MODULE_PATH ';'
+```
+
+**Example:**
+```embeem
+import "./platform_init";  // Runs module for side effects
+```
+
+### 9.4 Module Resolution
+
+1. **Relative paths** (starting with `./` or `../`) are resolved relative to the current file
+2. **Package paths** are resolved from:
+   - The project's `lib/` directory
+   - External packages in `packages/` or as specified in project configuration
+
+### 9.5 DAG Constraint
+
+To maintain totality, the module import graph must form a DAG:
+
+1. **No self-imports**: A module cannot import itself
+2. **No cycles**: If module A imports B, then B cannot (directly or transitively) import A
+3. **Compile-time check**: The compiler rejects programs with cyclic imports
+
+This ensures that module initialization has a well-defined order and all function call graphs remain acyclic.
+
+### 9.6 Visibility and Scoping
+
+- Items not explicitly exported are **private** to the module
+- Exported items are available to any module that imports them
+- Imports are scoped to the importing module—they do not propagate automatically
+
+### 9.7 Module Mangling
+
+Module paths are incorporated into the mangled names of functions to ensure uniqueness across the program.
+
+#### 9.7.1 Module Path Encoding
+
+Module paths are encoded using a similar length-prefixed scheme:
+
+1. Start with module prefix (default: `embeem_mod_`)
+2. For each path segment: `_` + length + `_` + segment (using `_` for path separators)
+3. Append the function mangling
+
+**Format:**
+```
+MANGLED_NAME ::= MODULE_PREFIX '$' SEGMENT_COUNT ('_' LENGTH '_' SEGMENT)* '_' FUNCTION_NAME
+```
+
+#### 9.7.2 Examples
+
+| Module Path | Function | Mangled C Name |
+|-------------|----------|----------------|
+| `main` (root) | `main` | `embeem_main` |
+| `./gpio` | `blink` | `embeem_mod_$1_4_gpio_blink` |
+| `./utils/gpio` | `toggle` | `embeem_mod_$2_5_utils_4_gpio_toggle` |
+| `drivers/bme280` | `init` | `embeem_mod_$2_7_drivers_6_bme280_init` |
+
+For the root/main module, functions use the simple function mangling without the module prefix.
+
+#### 9.7.3 Qualified Access
+
+When using namespace imports (`import * as name`), qualified access uses `::`:
+
+```embeem
+import * as gpio from "./gpio";
+
+fn main() {
+    gpio::blink(13, 5);  // Calls blink from gpio module
+}
+```
+
+The `::` operator is syntactic sugar—it resolves to the mangled name at compile time.
+
+#### 9.7.4 Constants Mangling
+
+Exported constants are mangled similarly:
+
+| Module Path | Constant | Mangled C Name |
+|-------------|----------|----------------|
+| `./gpio` | `LED_PIN` | `embeem_mod_$1_4_gpio_LED_PIN` |
+
+### 9.8 Complete Module Example
+
+**File: `gpio.em`**
+```embeem
+export const LED_PIN: u8 = 13;
+export const BUTTON_PIN: u8 = 2;
+
+export fn init() {
+    SET_MODE(GPIO(LED_PIN), 1);     // Output
+    SET_MODE(GPIO(BUTTON_PIN), 0);  // Input
+}
+
+export fn blink(times: u32) {
+    for i in 0 to times - 1 {
+        GPIO_TOGGLE(LED_PIN);
+        DELAY_MS(500);
+    }
+}
+
+fn internal_helper() {
+    // Not exported, private to this module
+}
+```
+
+**File: `main.em`**
+```embeem
+import { init, blink, LED_PIN } from "./gpio";
+
+fn main() {
+    init();
+    blink(10);
+}
+```
+
+**Generated C (simplified):**
+```c
+/* From gpio.em */
+#define embeem_mod_$1_4_gpio_LED_PIN (13)
+#define embeem_mod_$1_4_gpio_BUTTON_PIN (2)
+
+void embeem_mod_$1_4_gpio_init(void) {
+    embeem_op_$2_8_SET_MODE_4_GPIO(13, 1);
+    embeem_op_$2_8_SET_MODE_4_GPIO(2, 0);
+}
+
+void embeem_mod_$1_4_gpio_blink(uint32_t times) {
+    for (int64_t i = 0; i <= times - 1; i++) {
+        embeem_op_$1_11_GPIO_TOGGLE(13);
+        embeem_op_$1_8_DELAY_MS(500);
+    }
+}
+
+/* From main.em */
+void embeem_main(void) {
+    embeem_mod_$1_4_gpio_init();
+    embeem_mod_$1_4_gpio_blink(10);
+}
+```
+
+---
+
+## 10. Semantics
+
+### 10.1 Evaluation Order
 
 - Expressions are evaluated left-to-right
 - Function arguments are evaluated left-to-right
 - Short-circuit evaluation for `and` and `or`
 
-### 9.2 Integer Overflow
+### 10.2 Integer Overflow
 
 Integer operations wrap on overflow (modular arithmetic).
 
-### 9.3 Division by Zero
+### 10.3 Division by Zero
 
 Division or modulo by zero results in zero (defined behavior).
 
-### 9.4 Memory Model
+### 10.4 Memory Model
 
 - All variables have value semantics
 - No pointers or references
@@ -832,11 +1109,31 @@ Division or modulo by zero results in zero (defined behavior).
 
 ---
 
-## 10. Grammar
+## 11. Grammar
 
-### 10.1 Complete EBNF Grammar
+### 11.1 Complete EBNF Grammar
 
 ```ebnf
+(* Module structure *)
+module      = { module_item } ;
+module_item = import_decl | export_decl | item ;
+
+(* Import declarations *)
+import_decl    = named_import | namespace_import | side_effect_import ;
+named_import   = "import" "{" import_list "}" "from" MODULE_PATH ";" ;
+namespace_import = "import" "*" "as" IDENT "from" MODULE_PATH ";" ;
+side_effect_import = "import" MODULE_PATH ";" ;
+import_list    = import_spec { "," import_spec } ;
+import_spec    = IDENT [ "as" IDENT ] ;
+
+(* Export declarations *)
+export_decl    = "export" ( function | const_decl | extern_fn )
+               | "export" "{" export_list "}" [ "from" MODULE_PATH ] ";"
+               | "export" "*" "from" MODULE_PATH ";"
+               | "export" "*" "as" IDENT "from" MODULE_PATH ";" ;
+export_list    = export_spec { "," export_spec } ;
+export_spec    = IDENT [ "as" IDENT ] ;
+
 (* Program structure *)
 program     = { item } ;
 item        = function | const_decl | extern_fn ;
@@ -881,7 +1178,8 @@ shift_expr  = add_expr { shift_op add_expr } ;
 add_expr    = mul_expr { add_op mul_expr } ;
 mul_expr    = unary_expr { mul_op unary_expr } ;
 unary_expr  = unary_op unary_expr | primary ;
-primary     = IDENT | literal | "(" expr ")" | op_call | virtual_call | if_expr | block ;
+primary     = IDENT | qualified_ident | literal | "(" expr ")" | op_call | virtual_call | if_expr | block ;
+qualified_ident = IDENT "::" IDENT ;
 if_expr     = "if" expr block "else" block ;
 op_call     = OP_NAME "(" [ expr { "," expr } ] ")" ;
 virtual_call = VIRTUAL_OP "(" TARGET "(" [ expr { "," expr } ] ")" { "," expr } ")" ;
@@ -908,10 +1206,12 @@ const_expr  = expr ;  (* Must be evaluable at compile time *)
 
 (* Tokens *)
 IDENT       = ? [a-zA-Z_][a-zA-Z0-9_]* except keywords ? ;
+MODULE_PATH = STRING | IDENT { "/" IDENT } ;
 INTEGER     = ? decimal, hex, or binary integer literal ? ;
 FLOAT       = ? floating point literal ? ;
 BOOLEAN     = "true" | "false" ;
 OP_NAME     = ? Any operation name from Section 7 ? ;
+STRING      = '"' { ? any character except '"' ? } '"' ;
 ```
 
 ---
@@ -919,8 +1219,8 @@ OP_NAME     = ? Any operation name from Section 7 ? ;
 ## Appendix A: Reserved Words
 
 ```
-and     bool    const   downto  else    f32     f64     false
-fn      for     i8      i16     i32     i64     if      in
+and     as      bool    const   downto  else    export  f32     f64     false
+fn      for     from    i8      i16     i32     i64     if      import  in
 let     max     mut     not     or      repeat  return  to
 true    u8      u16     u32     u64     while
 ```

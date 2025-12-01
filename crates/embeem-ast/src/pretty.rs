@@ -304,6 +304,9 @@ impl PrettyPrint for Expression {
         match self {
             Expression::Literal(lit) => lit.pretty_print(ctx),
             Expression::Identifier(name) => name.clone(),
+            Expression::QualifiedIdentifier { namespace, name } => {
+                format!("{}::{}", namespace, name)
+            }
             Expression::Binary { op, left, right } => {
                 format!(
                     "({} {} {})",
@@ -329,6 +332,10 @@ impl PrettyPrint for Expression {
             Expression::Call { function, args } => {
                 let arg_strs: Vec<_> = args.iter().map(|a| a.pretty_print(ctx)).collect();
                 format!("{}({})", function, arg_strs.join(", "))
+            }
+            Expression::QualifiedCall { namespace, function, args } => {
+                let arg_strs: Vec<_> = args.iter().map(|a| a.pretty_print(ctx)).collect();
+                format!("{}::{}({})", namespace, function, arg_strs.join(", "))
             }
             Expression::Block(block) => block.pretty_print(ctx),
             Expression::Index { array, index } => {

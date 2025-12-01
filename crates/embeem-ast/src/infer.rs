@@ -87,6 +87,21 @@ impl TypeContext {
     pub fn clone_for_scope(&self) -> Self {
         self.clone()
     }
+
+    /// Add a constant binding to the context.
+    pub fn add_constant(&mut self, name: String, ty: Type) {
+        self.constants.insert(name, ty);
+    }
+
+    /// Add a function to the context.
+    pub fn add_function(&mut self, name: String, return_type: Option<Type>) {
+        self.functions.insert(name, return_type);
+    }
+
+    /// Add an external function to the context.
+    pub fn add_extern_fn(&mut self, name: String, return_type: Option<Type>) {
+        self.extern_fns.insert(name, return_type);
+    }
 }
 
 /// Infer the type of an expression given a type context.
@@ -100,6 +115,12 @@ pub fn infer_expression_type(expr: &Expression, ctx: &TypeContext) -> Option<Typ
             .get_variable(name)
             .or_else(|| ctx.get_constant(name))
             .cloned(),
+
+        Expression::QualifiedIdentifier { namespace: _, name: _ } => {
+            // Qualified identifiers require module context to resolve
+            // For now, return None and let the code generator handle it
+            None
+        }
 
         Expression::Binary { op, left, right } => {
             let left_ty = infer_expression_type(left, ctx)?;
@@ -136,6 +157,12 @@ pub fn infer_expression_type(expr: &Expression, ctx: &TypeContext) -> Option<Typ
         Expression::Call { function, .. } => ctx
             .get_function_return_type(function)
             .and_then(|opt_ty| opt_ty.cloned()),
+
+        Expression::QualifiedCall { namespace: _, function: _, .. } => {
+            // Qualified calls require module context to resolve
+            // For now, return None and let the code generator handle it
+            None
+        }
 
         Expression::Block(block) => infer_block_type(block, ctx),
 

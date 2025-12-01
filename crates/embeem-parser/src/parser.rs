@@ -12,6 +12,8 @@ use embeem_ast::{
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal, Param,
     PrimitiveType, Program, RangeDirection, Statement, Type, UnaryOp,
     is_upper_snake_case,
+    // Module system types
+    Module, ModuleItem, Item, Import, ImportSpec, ModulePath,
 };
 use nom::{
     IResult, Parser,
@@ -48,6 +50,24 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
             }
         }
         Err(_) => Err(ParseError::new("failed to parse program")),
+    }
+}
+
+/// Parse an Embeem module from source code.
+///
+/// A module can contain imports, exports, and regular items (functions, constants, extern fns).
+pub fn parse_module(input: &str) -> Result<Module, ParseError> {
+    let input = skip_ws(input);
+    match module(input) {
+        Ok((remaining, m)) => {
+            let remaining = skip_ws(remaining);
+            if remaining.is_empty() {
+                Ok(m)
+            } else {
+                Err(ParseError::new("unexpected input after module"))
+            }
+        }
+        Err(_) => Err(ParseError::new("failed to parse module")),
     }
 }
 
@@ -89,6 +109,310 @@ fn skip_ws(input: &str) -> &str {
         }
     }
     rest
+}
+
+/// Parse a module.
+///
+/// From spec Section 11.1 (EBNF Grammar):
+/// ```text
+/// module      = { module_item } ;
+/// module_item = import_decl | export_decl | item ;
+/// ```
+fn module(input: &str) -> IResult<&str, Module> {
+    let mut imports = Vec::new();
+    let mut items = Vec::new();
+    let mut current = input;
+    
+    loop {
+        let trimmed = skip_ws(current);
+        if trimmed.is_empty() {
+            break;
+        }
+        
+        // Try to parse import
+        if let Ok((rest, imp)) = import_decl(trimmed) {
+            imports.push(imp);
+            current = rest;
+            continue;
+        }
+        
+        // Try to parse export
+        if let Ok((rest, (exported, item))) = export_decl(trimmed) {
+            items.push(ModuleItem { exported, item });
+            current = rest;
+            continue;
+        }
+        
+        // Try to parse regular item (not exported)
+        if let Ok((rest, c)) = const_decl(trimmed) {
+            items.push(ModuleItem { exported: false, item: Item::Const(c) });
+            current = rest;
+            continue;
+        }
+        
+        if let Ok((rest, e)) = extern_fn(trimmed) {
+            items.push(ModuleItem { exported: false, item: Item::ExternFn(e) });
+            current = rest;
+            continue;
+        }
+        
+        if let Ok((rest, f)) = function(trimmed) {
+            items.push(ModuleItem { exported: false, item: Item::Function(f) });
+            current = rest;
+            continue;
+        }
+        
+        break;
+    }
+    
+    Ok((current, Module { imports, items }))
+}
+
+/// Parse an import declaration.
+///
+/// From spec Section 11.1 (EBNF Grammar):
+/// ```text
+/// import_decl    = named_import | namespace_import | side_effect_import ;
+/// named_import   = "import" "{" import_list "}" "from" MODULE_PATH ";" ;
+/// namespace_import = "import" "*" "as" IDENT "from" MODULE_PATH ";" ;
+/// side_effect_import = "import" MODULE_PATH ";" ;
+/// ```
+fn import_decl(input: &str) -> IResult<&str, Import> {
+    let (input, _) = tag("import").parse(input)?;
+    let input = skip_ws(input);
+    
+    // Try namespace import: import * as name from "path";
+    if input.starts_with('*') {
+        let (input, _) = char('*').parse(input)?;
+        let input = skip_ws(input);
+        let (input, _) = tag("as").parse(input)?;
+        let input = skip_ws(input);
+        let (input, alias) = identifier(input)?;
+        let input = skip_ws(input);
+        let (input, _) = tag("from").parse(input)?;
+        let input = skip_ws(input);
+        let (input, path) = module_path(input)?;
+        let input = skip_ws(input);
+        let (input, _) = char(';').parse(input)?;
+        
+        return Ok((input, Import::Namespace { alias, path }));
+    }
+    
+    // Try named import: import { a, b } from "path";
+    if input.starts_with('{') {
+        let (input, _) = char('{').parse(input)?;
+        let input = skip_ws(input);
+        let (input, items) = import_list(input)?;
+        let input = skip_ws(input);
+        let (input, _) = char('}').parse(input)?;
+        let input = skip_ws(input);
+        let (input, _) = tag("from").parse(input)?;
+        let input = skip_ws(input);
+        let (input, path) = module_path(input)?;
+        let input = skip_ws(input);
+        let (input, _) = char(';').parse(input)?;
+        
+        return Ok((input, Import::Named { items, path }));
+    }
+    
+    // Side effect import: import "path";
+    let (input, path) = module_path(input)?;
+    let input = skip_ws(input);
+    let (input, _) = char(';').parse(input)?;
+    
+    Ok((input, Import::SideEffect { path }))
+}
+
+/// Parse an import list.
+///
+/// From spec Section 11.1 (EBNF Grammar):
+/// ```text
+/// import_list    = import_spec { "," import_spec } ;
+/// import_spec    = IDENT [ "as" IDENT ] ;
+/// ```
+fn import_list(input: &str) -> IResult<&str, Vec<ImportSpec>> {
+    let mut items = Vec::new();
+    let mut current = input;
+    
+    loop {
+        let trimmed = skip_ws(current);
+        
+        // Check for end of list
+        if trimmed.starts_with('}') {
+            return Ok((trimmed, items));
+        }
+        
+        // Parse import spec
+        if let Ok((rest, spec)) = import_spec(trimmed) {
+            items.push(spec);
+            let rest = skip_ws(rest);
+            if rest.starts_with(',') {
+                current = skip_ws(&rest[1..]);
+                continue;
+            }
+            current = rest;
+            continue;
+        }
+        
+        break;
+    }
+    
+    Ok((current, items))
+}
+
+/// Parse an import specifier.
+fn import_spec(input: &str) -> IResult<&str, ImportSpec> {
+    let (input, name) = identifier(input)?;
+    let input = skip_ws(input);
+    
+    // Check for alias
+    let (input, alias) = if input.starts_with("as") && !is_ident_continue(input.chars().nth(2)) {
+        let (input, _) = tag("as").parse(input)?;
+        let input = skip_ws(input);
+        let (input, alias) = identifier(input)?;
+        (input, Some(alias))
+    } else {
+        (input, None)
+    };
+    
+    Ok((input, ImportSpec { name, alias }))
+}
+
+/// Parse a module path.
+///
+/// From spec Section 11.1 (EBNF Grammar):
+/// ```text
+/// MODULE_PATH = STRING | IDENT { "/" IDENT } ;
+/// ```
+fn module_path(input: &str) -> IResult<&str, ModulePath> {
+    // Try string literal first: "path/to/module"
+    if input.starts_with('"') {
+        let (input, path_str) = string_literal(input)?;
+        return Ok((input, parse_module_path_string(&path_str)));
+    }
+    
+    // Parse identifier path: path/to/module
+    let (input, first) = identifier(input)?;
+    let mut segments = vec![first];
+    let mut current = input;
+    
+    loop {
+        let trimmed = skip_ws(current);
+        if trimmed.starts_with('/') {
+            let (rest, _) = char('/').parse(trimmed)?;
+            let rest = skip_ws(rest);
+            if let Ok((rest, segment)) = identifier(rest) {
+                segments.push(segment);
+                current = rest;
+                continue;
+            }
+        }
+        break;
+    }
+    
+    Ok((current, ModulePath::package(segments)))
+}
+
+/// Parse a module path from a string literal.
+fn parse_module_path_string(s: &str) -> ModulePath {
+    let mut parent_count = 0;
+    let mut is_relative = false;
+    let mut path = s;
+    
+    // Check for relative paths
+    if path.starts_with("./") {
+        is_relative = true;
+        path = &path[2..];
+    } else if path.starts_with("../") {
+        is_relative = true;
+        while path.starts_with("../") {
+            parent_count += 1;
+            path = &path[3..];
+        }
+    }
+    
+    // Split remaining path into segments
+    let segments: Vec<String> = path.split('/').map(|s| s.to_string()).collect();
+    
+    ModulePath {
+        segments,
+        is_relative,
+        parent_count,
+    }
+}
+
+/// Parse a string literal.
+fn string_literal(input: &str) -> IResult<&str, String> {
+    let (input, _) = char('"').parse(input)?;
+    
+    let mut result = String::new();
+    let mut chars = input.char_indices();
+    
+    loop {
+        match chars.next() {
+            Some((i, '"')) => {
+                return Ok((&input[i + 1..], result));
+            }
+            Some((_, '\\')) => {
+                // Handle escape sequences
+                match chars.next() {
+                    Some((_, 'n')) => result.push('\n'),
+                    Some((_, 't')) => result.push('\t'),
+                    Some((_, 'r')) => result.push('\r'),
+                    Some((_, '\\')) => result.push('\\'),
+                    Some((_, '"')) => result.push('"'),
+                    _ => return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Char))),
+                }
+            }
+            Some((_, c)) => result.push(c),
+            None => return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Eof))),
+        }
+    }
+}
+
+/// Parse an export declaration.
+///
+/// From spec Section 11.1 (EBNF Grammar):
+/// ```text
+/// export_decl    = "export" ( function | const_decl | extern_fn )
+///                | "export" "{" export_list "}" [ "from" MODULE_PATH ] ";"
+///                | "export" "*" "from" MODULE_PATH ";"
+///                | "export" "*" "as" IDENT "from" MODULE_PATH ";" ;
+/// ```
+///
+/// Returns (is_exported, item) for regular items, or handles re-exports separately.
+fn export_decl(input: &str) -> IResult<&str, (bool, Item)> {
+    let (input, _) = tag("export").parse(input)?;
+    let input = skip_ws(input);
+    
+    // Try export function
+    if let Ok((rest, f)) = function(input) {
+        return Ok((rest, (true, Item::Function(f))));
+    }
+    
+    // Try export const
+    if let Ok((rest, c)) = const_decl(input) {
+        return Ok((rest, (true, Item::Const(c))));
+    }
+    
+    // Try export extern fn
+    if let Ok((rest, e)) = extern_fn(input) {
+        return Ok((rest, (true, Item::ExternFn(e))));
+    }
+    
+    // For now, we don't handle re-exports in this basic implementation
+    // (export { ... } from "..." and export * from "...")
+    // Those would require more complex handling during module resolution
+    
+    Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)))
+}
+
+/// Helper to check if a character can continue an identifier.
+fn is_ident_continue(c: Option<char>) -> bool {
+    match c {
+        Some(c) => c.is_alphanumeric() || c == '_',
+        None => false,
+    }
 }
 
 /// Parse a program.
@@ -1201,15 +1525,73 @@ fn integer_literal(input: &str) -> IResult<&str, u64> {
     Ok((rest, n))
 }
 
-/// Parse an operation, function call, or identifier.
+/// Parse an operation, function call, qualified identifier, or identifier.
 ///
 /// Operations are represented as paths of UPPER_SNAKE_CASE segments:
 /// - `FSUB(a, b)` -> path: ["FSUB"], args: [a, b]
 /// - `WRITE(GPIO(pin), value)` -> path: ["WRITE", "GPIO"], args: [pin, value]
 /// - `A(B(C(x), y), z)` -> path: ["A", "B", "C"], args: [x, y, z]
+///
+/// Qualified identifiers use `::` syntax:
+/// - `namespace::name` -> QualifiedIdentifier { namespace, name }
+/// - `namespace::func()` -> QualifiedCall { namespace, function, args }
 fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
     let (input, name) = identifier(input)?;
     let input_after_name = skip_ws(input);
+    
+    // Check for qualified identifier (namespace::name)
+    if input_after_name.starts_with("::") {
+        let (input, _) = tag("::").parse(input_after_name)?;
+        let input = skip_ws(input);
+        let (input, qualified_name) = identifier(input)?;
+        let input_after_qualified = skip_ws(input);
+        
+        // Check if it's a qualified function call
+        if input_after_qualified.starts_with('(') {
+            let (input, _) = char('(').parse(input_after_qualified)?;
+            let input = skip_ws(input);
+            
+            let mut args = Vec::new();
+            let mut current = input;
+            
+            loop {
+                let trimmed = skip_ws(current);
+                
+                if trimmed.starts_with(')') {
+                    current = &trimmed[1..];
+                    break;
+                }
+                
+                let (rest, arg) = expression(trimmed)?;
+                args.push(arg);
+                let rest = skip_ws(rest);
+                
+                if rest.starts_with(',') {
+                    current = skip_ws(&rest[1..]);
+                    continue;
+                }
+                
+                if rest.starts_with(')') {
+                    current = &rest[1..];
+                    break;
+                }
+                
+                return Err(nom::Err::Error(nom::error::Error::new(rest, nom::error::ErrorKind::Char)));
+            }
+            
+            return Ok((current, Expression::QualifiedCall {
+                namespace: name,
+                function: qualified_name,
+                args,
+            }));
+        }
+        
+        // It's a qualified identifier (namespace::name)
+        return Ok((input, Expression::QualifiedIdentifier {
+            namespace: name,
+            name: qualified_name,
+        }));
+    }
     
     // Check if followed by '('
     if !input_after_name.starts_with('(') {
@@ -1373,6 +1755,7 @@ fn identifier(input: &str) -> IResult<&str, String> {
         "let", "if", "else", "for", "in", "fn", "return",
         "true", "false", "to", "downto", "and", "or", "not",
         "while", "max", "repeat", "const", "mut", "as",
+        "import", "export", "from", "extern",
     ];
     
     if keywords.contains(&name) {
@@ -1824,6 +2207,215 @@ mod tests {
             assert_eq!(args.len(), 3); // 1, 42, 0xFF
         } else {
             panic!("Expected Operation expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_module_with_imports() {
+        let src = r#"
+            import { blink, LED_PIN } from "./gpio";
+            import * as sensors from "drivers/bme280";
+            
+            fn main() {
+                blink(10);
+            }
+        "#;
+        let result = parse_module(src);
+        assert!(result.is_ok());
+        let module = result.unwrap();
+        
+        // Check imports
+        assert_eq!(module.imports.len(), 2);
+        
+        // Named import
+        if let Import::Named { items, path } = &module.imports[0] {
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[0].name, "blink");
+            assert!(items[0].alias.is_none());
+            assert_eq!(items[1].name, "LED_PIN");
+            assert!(path.is_relative);
+            assert_eq!(path.segments, vec!["gpio"]);
+        } else {
+            panic!("Expected named import");
+        }
+        
+        // Namespace import
+        if let Import::Namespace { alias, path } = &module.imports[1] {
+            assert_eq!(alias, "sensors");
+            assert!(!path.is_relative);
+            assert_eq!(path.segments, vec!["drivers", "bme280"]);
+        } else {
+            panic!("Expected namespace import");
+        }
+        
+        // Check functions
+        assert_eq!(module.items.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_module_with_exports() {
+        let src = r#"
+            export const LED_PIN: u8 = 13;
+            
+            export fn blink(times: u32) {
+                for i in 0 to times {
+                    GPIO_TOGGLE(LED_PIN);
+                }
+            }
+            
+            fn helper() {
+                // Not exported
+            }
+        "#;
+        let result = parse_module(src);
+        assert!(result.is_ok());
+        let module = result.unwrap();
+        
+        assert_eq!(module.items.len(), 3);
+        
+        // First item: exported const
+        assert!(module.items[0].exported);
+        if let Item::Const(c) = &module.items[0].item {
+            assert_eq!(c.name, "LED_PIN");
+        } else {
+            panic!("Expected const");
+        }
+        
+        // Second item: exported function
+        assert!(module.items[1].exported);
+        if let Item::Function(f) = &module.items[1].item {
+            assert_eq!(f.name, "blink");
+        } else {
+            panic!("Expected function");
+        }
+        
+        // Third item: not exported
+        assert!(!module.items[2].exported);
+        if let Item::Function(f) = &module.items[2].item {
+            assert_eq!(f.name, "helper");
+        } else {
+            panic!("Expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_with_alias() {
+        let src = r#"
+            import { blink as gpio_blink, LED_PIN as PIN } from "./gpio";
+            
+            fn main() {}
+        "#;
+        let result = parse_module(src);
+        assert!(result.is_ok());
+        let module = result.unwrap();
+        
+        if let Import::Named { items, .. } = &module.imports[0] {
+            assert_eq!(items[0].name, "blink");
+            assert_eq!(items[0].alias.as_deref(), Some("gpio_blink"));
+            assert_eq!(items[0].local_name(), "gpio_blink");
+            
+            assert_eq!(items[1].name, "LED_PIN");
+            assert_eq!(items[1].alias.as_deref(), Some("PIN"));
+            assert_eq!(items[1].local_name(), "PIN");
+        } else {
+            panic!("Expected named import");
+        }
+    }
+
+    #[test]
+    fn test_parse_qualified_identifier() {
+        let src = r#"
+            import * as gpio from "./gpio";
+            
+            fn main() {
+                let pin = gpio::LED_PIN;
+                gpio::blink(10);
+            }
+        "#;
+        let result = parse_module(src);
+        assert!(result.is_ok());
+        let module = result.unwrap();
+        
+        // Find the main function
+        let main_fn = module.items.iter().find_map(|item| {
+            if let Item::Function(f) = &item.item {
+                if f.name == "main" { Some(f) } else { None }
+            } else { None }
+        }).expect("main function not found");
+        
+        // First statement: let pin = gpio::LED_PIN;
+        if let Statement::Let { value, .. } = &main_fn.body.statements[0] {
+            if let Expression::QualifiedIdentifier { namespace, name } = value {
+                assert_eq!(namespace, "gpio");
+                assert_eq!(name, "LED_PIN");
+            } else {
+                panic!("Expected qualified identifier, got {:?}", value);
+            }
+        } else {
+            panic!("Expected let statement");
+        }
+        
+        // Second statement: gpio::blink(10);
+        if let Statement::Expr(Expression::QualifiedCall { namespace, function, args }) = &main_fn.body.statements[1] {
+            assert_eq!(namespace, "gpio");
+            assert_eq!(function, "blink");
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("Expected qualified call");
+        }
+    }
+
+    #[test]
+    fn test_parse_module_path_relative() {
+        let src = r#"
+            import { a } from "./foo";
+            import { b } from "../bar";
+            import { c } from "../../baz/qux";
+            
+            fn main() {}
+        "#;
+        let result = parse_module(src);
+        assert!(result.is_ok());
+        let module = result.unwrap();
+        
+        // Check relative paths
+        if let Import::Named { path, .. } = &module.imports[0] {
+            assert!(path.is_relative);
+            assert_eq!(path.parent_count, 0);
+            assert_eq!(path.segments, vec!["foo"]);
+        }
+        
+        if let Import::Named { path, .. } = &module.imports[1] {
+            assert!(path.is_relative);
+            assert_eq!(path.parent_count, 1);
+            assert_eq!(path.segments, vec!["bar"]);
+        }
+        
+        if let Import::Named { path, .. } = &module.imports[2] {
+            assert!(path.is_relative);
+            assert_eq!(path.parent_count, 2);
+            assert_eq!(path.segments, vec!["baz", "qux"]);
+        }
+    }
+
+    #[test]
+    fn test_parse_export_extern_fn() {
+        let src = r#"
+            export extern fn platform_init();
+            
+            fn main() {
+                platform_init();
+            }
+        "#;
+        let result = parse_module(src);
+        assert!(result.is_ok());
+        let module = result.unwrap();
+        
+        assert!(module.items[0].exported);
+        if let Item::ExternFn(e) = &module.items[0].item {
+            assert_eq!(e.name, "platform_init");
+        } else {
+            panic!("Expected extern fn");
         }
     }
 }

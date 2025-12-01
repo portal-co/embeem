@@ -4,7 +4,137 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+/// A complete Embeem module.
+///
+/// A module is the top-level compilation unit in Embeem. It contains imports,
+/// exports, and items (constants, extern fns, functions).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Module {
+    /// Import declarations.
+    pub imports: Vec<Import>,
+    /// Items in the module.
+    pub items: Vec<ModuleItem>,
+}
+
+/// An item in a module, which may be exported.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModuleItem {
+    /// Whether this item is exported.
+    pub exported: bool,
+    /// The actual item.
+    pub item: Item,
+}
+
+/// A top-level item (function, constant, or extern fn).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item {
+    /// Constant declaration.
+    Const(ConstDecl),
+    /// External function declaration.
+    ExternFn(ExternFn),
+    /// Function definition.
+    Function(Function),
+}
+
+/// An import declaration.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Import {
+    /// Named import: `import { a, b as c } from "path";`
+    Named {
+        /// The items to import with optional aliases.
+        items: Vec<ImportSpec>,
+        /// The module path to import from.
+        path: ModulePath,
+    },
+    /// Namespace import: `import * as name from "path";`
+    Namespace {
+        /// The namespace alias.
+        alias: String,
+        /// The module path to import from.
+        path: ModulePath,
+    },
+    /// Side-effect import: `import "path";`
+    SideEffect {
+        /// The module path to import.
+        path: ModulePath,
+    },
+}
+
+/// A single import specifier with optional alias.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImportSpec {
+    /// The original name in the source module.
+    pub name: String,
+    /// Optional alias for the import.
+    pub alias: Option<String>,
+}
+
+impl ImportSpec {
+    /// Get the local name (alias if present, otherwise the original name).
+    pub fn local_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+}
+
+/// A module path (e.g., "./gpio", "drivers/bme280").
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModulePath {
+    /// The path segments.
+    pub segments: Vec<String>,
+    /// Whether this is a relative path (starts with ./ or ../).
+    pub is_relative: bool,
+    /// Number of parent directory references (..).
+    pub parent_count: usize,
+}
+
+impl ModulePath {
+    /// Create a new relative module path.
+    pub fn relative(segments: Vec<String>) -> Self {
+        Self {
+            segments,
+            is_relative: true,
+            parent_count: 0,
+        }
+    }
+
+    /// Create a new absolute/package module path.
+    pub fn package(segments: Vec<String>) -> Self {
+        Self {
+            segments,
+            is_relative: false,
+            parent_count: 0,
+        }
+    }
+
+    /// Create a path with parent references.
+    pub fn with_parent_count(mut self, count: usize) -> Self {
+        self.parent_count = count;
+        self
+    }
+}
+
+/// A re-export declaration.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReExport {
+    /// Re-export named items: `export { a, b } from "path";`
+    Named {
+        items: Vec<ImportSpec>,
+        path: ModulePath,
+    },
+    /// Re-export all: `export * from "path";`
+    All {
+        path: ModulePath,
+    },
+    /// Re-export all as namespace: `export * as name from "path";`
+    AllAs {
+        alias: String,
+        path: ModulePath,
+    },
+}
+
 /// A complete Embeem program.
+///
+/// This is a flattened representation after module resolution.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
     /// Constant declarations.
@@ -170,6 +300,14 @@ pub enum Expression {
     Literal(Literal),
     /// Identifier reference.
     Identifier(String),
+    /// Qualified identifier (namespace::name).
+    /// Used for accessing items from namespace imports.
+    QualifiedIdentifier {
+        /// The namespace (from `import * as namespace`).
+        namespace: String,
+        /// The item name within the namespace.
+        name: String,
+    },
     /// Binary operation.
     Binary {
         op: BinaryOp,
@@ -209,6 +347,16 @@ pub enum Expression {
     /// Function call.
     Call {
         function: String,
+        args: Vec<Expression>,
+    },
+    /// Qualified function call (namespace::function()).
+    /// Used for calling functions from namespace imports.
+    QualifiedCall {
+        /// The namespace (from `import * as namespace`).
+        namespace: String,
+        /// The function name within the namespace.
+        function: String,
+        /// The arguments to the function.
         args: Vec<Expression>,
     },
     /// Block expression.

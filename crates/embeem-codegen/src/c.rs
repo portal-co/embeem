@@ -11,10 +11,16 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use embeem_ast::{
-    mangle::{mangle_extern_function_name, mangle_function_name, mangle_operation_path, MangleConfig},
+    mangle::{
+        mangle_extern_function_name, mangle_function_name, mangle_operation_path,
+        mangle_module_function_name, mangle_module_constant_name, mangle_module_extern_function_name,
+        MangleConfig,
+    },
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal,
     PrimitiveType, Program, RangeDirection, Statement, Type, TypeContext, UnaryOp,
     infer_expression_type,
+    // Module types
+    Module, Item,
 };
 
 /// Code generation error.
@@ -156,6 +162,202 @@ impl CCodegen {
         }
 
         Ok(self.output.clone())
+    }
+
+    /// Generate C code from an Embeem module.
+    ///
+    /// This generates code for a module with the given module path.
+    /// The module path is used to mangle function and constant names.
+    pub fn generate_module(&mut self, module: &Module, module_path: &[String]) -> Result<String, CodegenError> {
+        self.output.clear();
+        self.temp_counter = 0;
+        
+        // Build type context from module items
+        self.type_ctx = self.type_ctx_from_module(module);
+
+        // Generate header
+        self.emit_header();
+        
+        // Generate module path comment
+        if !module_path.is_empty() {
+            self.emit_line(&format!("/* Module: {} */", module_path.join("/")));
+            self.emit_line("");
+        }
+
+        // Collect items by type
+        let mut constants = Vec::new();
+        let mut extern_fns = Vec::new();
+        let mut functions = Vec::new();
+        
+        for item in &module.items {
+            match &item.item {
+                Item::Const(c) => constants.push((item.exported, c)),
+                Item::ExternFn(e) => extern_fns.push((item.exported, e)),
+                Item::Function(f) => functions.push((item.exported, f)),
+            }
+        }
+
+        // Generate constants
+        for (exported, constant) in &constants {
+            self.emit_module_const(constant, module_path, *exported)?;
+        }
+        if !constants.is_empty() {
+            self.emit_line("");
+        }
+
+        // Generate external function declarations
+        if !extern_fns.is_empty() {
+            self.emit_line("/* External function declarations */");
+            for (exported, extern_fn) in &extern_fns {
+                self.emit_module_extern_fn_decl(extern_fn, module_path, *exported)?;
+            }
+            self.emit_line("");
+        }
+
+        // Generate function declarations
+        for (_exported, function) in &functions {
+            self.emit_module_function_decl(function, module_path)?;
+        }
+        if !functions.is_empty() {
+            self.emit_line("");
+        }
+
+        // Generate function definitions
+        for (_exported, function) in &functions {
+            self.emit_module_function(function, module_path)?;
+            self.emit_line("");
+        }
+
+        Ok(self.output.clone())
+    }
+
+    /// Build a TypeContext from a Module.
+    fn type_ctx_from_module(&self, module: &Module) -> TypeContext {
+        let mut ctx = TypeContext::new();
+        
+        for item in &module.items {
+            match &item.item {
+                Item::Const(c) => {
+                    ctx.add_constant(c.name.clone(), c.ty.clone());
+                }
+                Item::ExternFn(e) => {
+                    ctx.add_extern_fn(e.name.clone(), e.return_type.clone());
+                }
+                Item::Function(f) => {
+                    ctx.add_function(f.name.clone(), f.return_type.clone());
+                }
+            }
+        }
+        
+        ctx
+    }
+
+    /// Emit a constant with module path mangling.
+    fn emit_module_const(&mut self, constant: &ConstDecl, module_path: &[String], exported: bool) -> Result<(), CodegenError> {
+        let value = self.expr_to_c(&constant.value)?;
+        let mangled_name = mangle_module_constant_name(module_path, &constant.name, &self.options.mangle_config);
+        
+        if exported {
+            self.emit_line(&format!("/* exported */ #define {} ({})", mangled_name, value));
+        } else {
+            self.emit_line(&format!("#define {} ({})", mangled_name, value));
+        }
+        Ok(())
+    }
+
+    /// Emit an external function declaration with module path mangling.
+    fn emit_module_extern_fn_decl(&mut self, extern_fn: &ExternFn, module_path: &[String], exported: bool) -> Result<(), CodegenError> {
+        let return_type = match &extern_fn.return_type {
+            Some(ty) => self.type_to_c(ty),
+            None => "void".to_string(),
+        };
+
+        let params = extern_fn
+            .params
+            .iter()
+            .map(|p| format!("{} {}", self.type_to_c(&p.ty), p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let params = if params.is_empty() {
+            "void".to_string()
+        } else {
+            params
+        };
+
+        let mangled_name = mangle_module_extern_function_name(module_path, &extern_fn.name, &self.options.mangle_config);
+        
+        if exported {
+            self.emit_line(&format!("/* exported */ extern {} {}({});", return_type, mangled_name, params));
+        } else {
+            self.emit_line(&format!("extern {} {}({});", return_type, mangled_name, params));
+        }
+        Ok(())
+    }
+
+    /// Emit a function declaration with module path mangling.
+    fn emit_module_function_decl(&mut self, function: &Function, module_path: &[String]) -> Result<(), CodegenError> {
+        let return_type = match &function.return_type {
+            Some(ty) => self.type_to_c(ty),
+            None => "void".to_string(),
+        };
+
+        let params = function
+            .params
+            .iter()
+            .map(|p| format!("{} {}", self.type_to_c(&p.ty), p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let params = if params.is_empty() {
+            "void".to_string()
+        } else {
+            params
+        };
+
+        let mangled_name = mangle_module_function_name(module_path, &function.name, &self.options.mangle_config);
+        self.emit_line(&format!("{} {}({});", return_type, mangled_name, params));
+        Ok(())
+    }
+
+    /// Emit a function definition with module path mangling.
+    fn emit_module_function(&mut self, function: &Function, module_path: &[String]) -> Result<(), CodegenError> {
+        // Save the current type context and add function parameters
+        let saved_ctx = self.type_ctx.clone();
+        for param in &function.params {
+            self.type_ctx.add_variable(param.name.clone(), param.ty.clone());
+        }
+
+        let return_type = match &function.return_type {
+            Some(ty) => self.type_to_c(ty),
+            None => "void".to_string(),
+        };
+
+        let params = function
+            .params
+            .iter()
+            .map(|p| format!("{} {}", self.type_to_c(&p.ty), p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let params = if params.is_empty() {
+            "void".to_string()
+        } else {
+            params
+        };
+
+        let mangled_name = mangle_module_function_name(module_path, &function.name, &self.options.mangle_config);
+        self.emit_line(&format!("{} {}({}) {{", return_type, mangled_name, params));
+        self.indent += 1;
+
+        self.emit_block(&function.body, function.return_type.is_some())?;
+
+        self.indent -= 1;
+        self.emit_line("}");
+
+        // Restore the type context
+        self.type_ctx = saved_ctx;
+        Ok(())
     }
 
     fn emit_header(&mut self) {
@@ -440,6 +642,14 @@ impl CCodegen {
 
             Expression::Identifier(name) => Ok(name.clone()),
 
+            Expression::QualifiedIdentifier { namespace, name } => {
+                // For qualified identifiers (namespace::name), we need to resolve
+                // the full module path. For now, we emit a simple concatenation
+                // that assumes the namespace has been resolved to a module path.
+                // In a full implementation, this would look up the import table.
+                Ok(format!("{}_{}", namespace, name))
+            }
+
             Expression::Binary { op, left, right } => {
                 let l = self.expr_to_c(left)?;
                 let r = self.expr_to_c(right)?;
@@ -519,6 +729,17 @@ impl CCodegen {
                     mangle_function_name(function, &self.options.mangle_config)
                 };
                 Ok(format!("{}({})", name, arg_strs.join(", ")))
+            }
+
+            Expression::QualifiedCall { namespace, function, args } => {
+                let arg_strs: Result<Vec<_>, _> =
+                    args.iter().map(|a| self.expr_to_c(a)).collect();
+                let arg_strs = arg_strs?;
+                // For qualified calls (namespace::function()), we need to resolve
+                // the full module path. For now, we emit a simple concatenation
+                // that assumes the namespace has been resolved to a module path.
+                // In a full implementation, this would look up the import table.
+                Ok(format!("{}_{}({})", namespace, function, arg_strs.join(", ")))
             }
 
             Expression::Block(blk) => {
@@ -1216,5 +1437,63 @@ mod tests {
         assert!(c_code.contains("embeem_op_$1_4_FSUB("), "Expected embeem_op_$1_4_FSUB, got:\n{}", c_code);
         // READ(ADC(...)) -> embeem_op_$2_4_READ_3_ADC
         assert!(c_code.contains("embeem_op_$2_4_READ_3_ADC("), "Expected embeem_op_$2_4_READ_3_ADC, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_module_codegen() {
+        use embeem_parser::parse_module;
+        
+        let src = r#"
+            export const LED_PIN: u8 = 13;
+            
+            export fn blink(times: u32) {
+                for i in 0 to times {
+                    GPIO_TOGGLE(LED_PIN);
+                }
+            }
+            
+            fn helper() {
+                // Not exported
+            }
+        "#;
+        let module = parse_module(src).unwrap();
+        let mut codegen = CCodegen::new();
+        let c_code = codegen.generate_module(&module, &["gpio".to_string()]).unwrap();
+        
+        // Check module path in comment
+        assert!(c_code.contains("/* Module: gpio */"), "Expected module comment, got:\n{}", c_code);
+        
+        // Check that constants are mangled with module path
+        assert!(c_code.contains("embeem_mod_$1_4_gpio_LED_PIN"), 
+            "Expected module-mangled constant, got:\n{}", c_code);
+        
+        // Check that functions are mangled with module path
+        assert!(c_code.contains("embeem_mod_$1_4_gpio_blink"), 
+            "Expected module-mangled function, got:\n{}", c_code);
+        
+        // Check that exported items have a comment
+        assert!(c_code.contains("/* exported */"), 
+            "Expected exported comment, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_module_codegen_nested_path() {
+        use embeem_parser::parse_module;
+        
+        let src = r#"
+            export fn init() {
+                // Initialize sensor
+            }
+        "#;
+        let module = parse_module(src).unwrap();
+        let mut codegen = CCodegen::new();
+        let c_code = codegen.generate_module(
+            &module, 
+            &["drivers".to_string(), "bme280".to_string()]
+        ).unwrap();
+        
+        // Check that functions use the full module path in mangling
+        assert!(c_code.contains("embeem_mod_$2_7_drivers_6_bme280_init"), 
+            "Expected nested module-mangled function, got:\n{}", c_code);
     }
 }
