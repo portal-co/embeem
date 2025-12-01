@@ -486,101 +486,105 @@ See the complete emback operations documentation for:
 - Power Management Operations
 - RTC Operations
 
-### 7.14 Virtual Function Call Syntax
+### 7.14 Operation Paths
 
-Embeem supports a "virtual function call" syntax that allows expressing operations in a more object-oriented style. This syntax separates the **target** (the peripheral or resource) from the **operation** being performed.
+Embeem represents operations as **paths**—lists of `UPPER_SNAKE_CASE` identifiers. This provides a unified semantic model for both simple operations and nested hardware operations.
 
 #### 7.14.1 Syntax
 
 ```
-VIRTUAL_CALL ::= OP_NAME '(' TARGET '(' TARGET_ARGS ')' (',' EXPR)* ')'
-TARGET       ::= 'GPIO' | 'ADC' | 'DAC' | 'PWM' | 'TIMER' | 'UART' | 'SPI' | 'I2C' | 'CAN' | 'USB' | 'DMA' | 'WDT' | 'EEPROM' | 'FLASH' | 'RTC'
+OPERATION_CALL ::= OP_SEGMENT '(' (OPERATION_CALL | EXPR) (',' EXPR)* ')'
+                 | OP_SEGMENT '(' ')'
+
+OP_SEGMENT     ::= UPPER_SNAKE_CASE
 ```
 
-#### 7.14.2 Target Types
+Operations are parsed by collecting nested `UPPER_SNAKE_CASE` segments into a path. The innermost arguments become the operation's arguments.
 
-| Target | Description | Target Arguments |
-|--------|-------------|------------------|
-| `GPIO` | General Purpose I/O | `GPIO(pin)` |
-| `ADC` | Analog-to-Digital Converter | `ADC(channel)` |
-| `DAC` | Digital-to-Analog Converter | `DAC(channel)` |
-| `PWM` | Pulse Width Modulation | `PWM(channel)` |
-| `TIMER` | Hardware Timer | `TIMER(timer_num)` |
-| `UART` | Serial Communication | `UART(uart_num)` |
-| `SPI` | Serial Peripheral Interface | `SPI(spi_num)` |
-| `I2C` | Inter-Integrated Circuit | `I2C(i2c_num)` |
-| `CAN` | Controller Area Network | `CAN(can_num)` |
-| `USB` | Universal Serial Bus | `USB(usb_num)` |
-| `DMA` | Direct Memory Access | `DMA(dma_num)` |
-| `WDT` | Watchdog Timer | `WDT()` |
-| `EEPROM` | EEPROM Memory | `EEPROM(addr)` |
-| `FLASH` | Flash Memory | `FLASH(addr)` |
-| `RTC` | Real-Time Clock | `RTC(rtc_num)` |
+#### 7.14.2 Path Construction
 
-#### 7.14.3 Virtual Operations
+When the parser encounters an `UPPER_SNAKE_CASE` identifier followed by parentheses, it builds an operation path:
 
-| Operation | Description | Example |
-|-----------|-------------|---------|
-| `READ` | Read from target | `READ(GPIO(13))`, `READ(ADC(0))` |
-| `WRITE` | Write to target | `WRITE(GPIO(13), 1)`, `WRITE(DAC(0), 128)` |
-| `INIT` | Initialize target | `INIT(UART(0))`, `INIT(I2C(0))` |
-| `START` | Start target | `START(PWM(0))`, `START(TIMER(0))` |
-| `STOP` | Stop target | `STOP(PWM(0))`, `STOP(TIMER(0))` |
-| `RESET` | Reset target | `RESET(TIMER(0))`, `RESET(WDT())` |
-| `TOGGLE` | Toggle target state | `TOGGLE(GPIO(13))` |
-| `SET_MODE` | Set operation mode | `SET_MODE(GPIO(13), 1)` |
-| `SET_FREQUENCY` | Set frequency | `SET_FREQUENCY(PWM(0), 1000)` |
-| `SET_DUTY_CYCLE` | Set PWM duty cycle | `SET_DUTY_CYCLE(PWM(0), 128)` |
-| `SET_CLOCK` | Set clock speed | `SET_CLOCK(I2C(0), 100000)` |
-| `SET_BAUD_RATE` | Set baud rate | `SET_BAUD_RATE(UART(0), 9600)` |
-| `TRANSFER` | Transfer data | `TRANSFER(SPI(0), data)` |
-| `AVAILABLE` | Check data available | `AVAILABLE(UART(0))` |
-| `FLUSH` | Flush buffers | `FLUSH(UART(0))` |
-| `ENABLE` | Enable target | `ENABLE(WDT())` |
-| `DISABLE` | Disable target | `DISABLE(WDT())` |
+| Source Syntax | Path | Arguments |
+|---------------|------|-----------|
+| `FSUB(a, b)` | `["FSUB"]` | `a`, `b` |
+| `GPIO_READ(13)` | `["GPIO_READ"]` | `13` |
+| `READ(GPIO(13))` | `["READ", "GPIO"]` | `13` |
+| `WRITE(GPIO(13), 1)` | `["WRITE", "GPIO"]` | `13`, `1` |
+| `SET_FREQUENCY(PWM(0), 1000)` | `["SET_FREQUENCY", "PWM"]` | `0`, `1000` |
+| `OUTER(MIDDLE(INNER(x)))` | `["OUTER", "MIDDLE", "INNER"]` | `x` |
 
-#### 7.14.4 Equivalence to Traditional Syntax
+The first argument of each outer operation, if it's an `UPPER_SNAKE_CASE` call, becomes the next path segment. All other arguments are collected as the operation's arguments.
 
-The virtual function call syntax is syntactic sugar that desugars to the traditional operation syntax:
+#### 7.14.3 Semantic Model
 
-| Virtual Syntax | Traditional Syntax |
-|----------------|-------------------|
-| `READ(GPIO(13))` | `GPIO_READ(13)` |
-| `WRITE(GPIO(13), 1)` | `GPIO_WRITE(13, 1)` |
-| `TOGGLE(GPIO(13))` | `GPIO_TOGGLE(13)` |
-| `SET_MODE(GPIO(13), 1)` | `GPIO_SET_MODE(13, 1)` |
-| `READ(ADC(0))` | `ADC_READ(0)` |
-| `WRITE(DAC(0), 128)` | `DAC_WRITE(0, 128)` |
-| `START(PWM(0))` | `PWM_START(0)` |
-| `STOP(PWM(0))` | `PWM_STOP(0)` |
-| `SET_DUTY_CYCLE(PWM(0), 128)` | `PWM_SET_DUTY_CYCLE(0, 128)` |
-| `SET_FREQUENCY(PWM(0), 1000)` | `PWM_SET_FREQUENCY(0, 1000)` |
-| `START(TIMER(0))` | `TIMER_START(0)` |
-| `STOP(TIMER(0))` | `TIMER_STOP(0)` |
-| `RESET(TIMER(0))` | `TIMER_RESET(0)` |
-| `READ(TIMER(0))` | `TIMER_READ(0)` |
-| `INIT(UART(0))` | `UART_INIT(0)` |
-| `WRITE(UART(0), byte)` | `UART_WRITE_BYTE(0, byte)` |
-| `READ(UART(0))` | `UART_READ_BYTE(0)` |
-| `AVAILABLE(UART(0))` | `UART_AVAILABLE(0)` |
-| `FLUSH(UART(0))` | `UART_FLUSH(0)` |
-| `SET_BAUD_RATE(UART(0), 9600)` | `UART_SET_BAUD_RATE(0, 9600)` |
-| `INIT(SPI(0))` | `SPI_INIT(0)` |
-| `TRANSFER(SPI(0), data)` | `SPI_TRANSFER(0, data)` |
-| `INIT(I2C(0))` | `I2C_INIT(0)` |
-| `START(I2C(0))` | `I2C_START(0)` |
-| `STOP(I2C(0))` | `I2C_STOP(0)` |
-| `SET_CLOCK(I2C(0), 100000)` | `I2C_SET_CLOCK(0, 100000)` |
-| `ENABLE(WDT())` | `WDT_ENABLE()` |
-| `DISABLE(WDT())` | `WDT_DISABLE()` |
-| `RESET(WDT())` | `WDT_RESET()` |
+The path-based model provides:
 
-#### 7.14.5 Benefits
+1. **Unified representation**: Both `GPIO_READ(13)` and `READ(GPIO(13))` are valid—the former produces path `["GPIO_READ"]`, the latter produces `["READ", "GPIO"]`
 
-1. **Readability**: The target is clearly separated from the operation
-2. **Consistency**: Same operation name (`READ`, `WRITE`) works across different peripherals
-3. **Discoverability**: Easier to find related operations for a peripheral
-4. **Extensibility**: New peripherals can reuse standard operation names
+2. **Composability**: Operations can be nested arbitrarily deep, with each level adding to the path
+
+3. **Extensibility**: No fixed set of operations or targets—any `UPPER_SNAKE_CASE` identifier is valid
+
+#### 7.14.4 Common Operation Patterns
+
+| Pattern | Description | Examples |
+|---------|-------------|----------|
+| `READ(TARGET(...))` | Read from peripheral | `READ(GPIO(13))`, `READ(ADC(0))` |
+| `WRITE(TARGET(...), val)` | Write to peripheral | `WRITE(GPIO(13), 1)`, `WRITE(DAC(0), 128)` |
+| `INIT(TARGET(...))` | Initialize peripheral | `INIT(UART(0))`, `INIT(I2C(0))` |
+| `START(TARGET(...))` | Start peripheral | `START(PWM(0))`, `START(TIMER(0))` |
+| `STOP(TARGET(...))` | Stop peripheral | `STOP(PWM(0))`, `STOP(TIMER(0))` |
+| `TOGGLE(TARGET(...))` | Toggle state | `TOGGLE(GPIO(13))` |
+| `SET_*(TARGET(...), val)` | Configure peripheral | `SET_MODE(GPIO(13), 1)` |
+
+Common targets include: `GPIO`, `ADC`, `DAC`, `PWM`, `TIMER`, `UART`, `SPI`, `I2C`, `WDT`, `EEPROM`, `FLASH`, `RTC`.
+
+#### 7.14.5 Code Generation and Mangling
+
+Operation paths are mangled into C function names using the following scheme:
+
+1. Join path segments with underscores
+2. Convert to lowercase
+3. Prepend the operation prefix (`embeem_op_` by default)
+
+| Path | Mangled C Function |
+|------|-------------------|
+| `["FSUB"]` | `embeem_op_fsub` |
+| `["GPIO_READ"]` | `embeem_op_gpio_read` |
+| `["READ", "GPIO"]` | `embeem_op_read_gpio` |
+| `["WRITE", "GPIO"]` | `embeem_op_write_gpio` |
+| `["SET_FREQUENCY", "PWM"]` | `embeem_op_set_frequency_pwm` |
+
+**Note**: Single-segment paths for built-in C operators (e.g., `["ADD"]`, `["SUB"]`, `["MUL"]`) may be inlined directly as C operators rather than function calls.
+
+#### 7.14.6 Implementation Notes
+
+The runtime library must provide implementations for all operation paths used in a program. The mangling scheme ensures predictable function names:
+
+```c
+// Implementation for READ(GPIO(pin))
+int32_t embeem_op_read_gpio(int32_t pin) {
+    return digitalRead(pin);
+}
+
+// Implementation for WRITE(GPIO(pin), value)
+void embeem_op_write_gpio(int32_t pin, int32_t value) {
+    digitalWrite(pin, value);
+}
+
+// Implementation for SET_FREQUENCY(PWM(channel), freq)
+void embeem_op_set_frequency_pwm(int32_t channel, int32_t freq) {
+    // Platform-specific PWM frequency configuration
+}
+```
+
+#### 7.14.7 Benefits
+
+1. **Simplicity**: One unified model for all operations
+2. **Flexibility**: No hardcoded operation or target lists
+3. **Predictability**: Deterministic mangling from source to C
+4. **Composability**: Arbitrary nesting depth supported
 
 **Example Program:**
 ```embeem

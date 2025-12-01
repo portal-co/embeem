@@ -6,11 +6,12 @@
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use alloc::vec;
 
 use embeem_ast::{
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal, Param,
     PrimitiveType, Program, RangeDirection, Statement, Type, UnaryOp,
-    Target, VirtualOp,
+    is_upper_snake_case,
 };
 use nom::{
     IResult, Parser,
@@ -1163,6 +1164,12 @@ fn integer_literal(input: &str) -> IResult<&str, u64> {
     Ok((rest, n))
 }
 
+/// Parse an operation, function call, or identifier.
+///
+/// Operations are represented as paths of UPPER_SNAKE_CASE segments:
+/// - `FSUB(a, b)` -> path: ["FSUB"], args: [a, b]
+/// - `WRITE(GPIO(pin), value)` -> path: ["WRITE", "GPIO"], args: [pin, value]
+/// - `A(B(C(x), y), z)` -> path: ["A", "B", "C"], args: [x, y, z]
 fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
     let (input, name) = identifier(input)?;
     let input_after_name = skip_ws(input);
@@ -1172,12 +1179,12 @@ fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
         return Ok((input, Expression::Identifier(name)));
     }
     
-    // Check if this is a virtual operation (like READ, WRITE, etc.)
-    if let Some(virtual_op) = VirtualOp::from_str(&name) {
-        return parse_virtual_call(input_after_name, virtual_op);
+    // Check if this is an operation (UPPER_SNAKE_CASE)
+    if is_upper_snake_case(&name) {
+        return parse_operation_call(input_after_name, vec![name]);
     }
     
-    // Parse arguments
+    // It's a regular function call - parse arguments
     let (input, _) = char('(').parse(input_after_name)?;
     let input = skip_ws(input);
     
@@ -1209,82 +1216,67 @@ fn operation_or_call_or_ident(input: &str) -> IResult<&str, Expression> {
         return Err(nom::Err::Error(nom::error::Error::new(rest, nom::error::ErrorKind::Char)));
     }
     
-    // Check if it's an operation
-    if let Some(kind) = embeem_ast::op_name_from_str(&name) {
-        Ok((current, Expression::Operation { kind, args }))
-    } else {
-        Ok((current, Expression::Call { function: name, args }))
-    }
+    Ok((current, Expression::Call { function: name, args }))
 }
 
-/// Parse a virtual function call like `WRITE(GPIO(pin), value)`.
+/// Parse an operation call with a given path prefix.
 ///
-/// The virtual operation (like WRITE, READ) has already been identified.
 /// The input starts at the opening parenthesis.
+/// The path contains the UPPER_SNAKE_CASE segments collected so far.
 ///
-/// Virtual calls have the form: `OP(TARGET(target_args...), additional_args...)`
-fn parse_virtual_call(input: &str, virtual_op: VirtualOp) -> IResult<&str, Expression> {
+/// This function recursively builds the operation path by checking if the first
+/// argument is also an UPPER_SNAKE_CASE operation call.
+fn parse_operation_call(input: &str, mut path: Vec<String>) -> IResult<&str, Expression> {
     let (input, _) = char('(').parse(input)?;
     let input = skip_ws(input);
     
-    // The first argument should be TARGET(args...)
-    // Parse the target name
-    let (input, target_name) = identifier(input)?;
-    
-    // Check if it's a valid target
-    let target = match Target::from_str(&target_name) {
-        Some(t) => t,
-        None => {
-            // Not a virtual call target, treat as regular expression
-            // This shouldn't happen if VirtualOp::from_str was true, but just in case
-            return Err(nom::Err::Error(nom::error::Error::new(input, nom::error::ErrorKind::Tag)));
-        }
-    };
-    
-    let input = skip_ws(input);
-    
-    // Parse target's arguments (e.g., the pin number in GPIO(13))
-    let (input, _) = char('(').parse(input)?;
-    let input = skip_ws(input);
-    
-    let mut target_args = Vec::new();
-    let mut current = input;
-    
-    loop {
-        let trimmed = skip_ws(current);
-        
-        if trimmed.starts_with(')') {
-            current = &trimmed[1..];
-            break;
-        }
-        
-        let (rest, arg) = expression(trimmed)?;
-        target_args.push(arg);
-        let rest = skip_ws(rest);
-        
-        if rest.starts_with(',') {
-            current = skip_ws(&rest[1..]);
-            continue;
-        }
-        
-        if rest.starts_with(')') {
-            current = &rest[1..];
-            break;
-        }
-        
-        return Err(nom::Err::Error(nom::error::Error::new(rest, nom::error::ErrorKind::Char)));
+    // Check if this is an empty argument list
+    if input.starts_with(')') {
+        return Ok((&input[1..], Expression::Operation { path, args: Vec::new() }));
     }
     
-    let current = skip_ws(current);
+    // Try to parse the first argument - it might be a nested operation
+    let mut all_args = Vec::new();
+    let mut current = input;
     
-    // Parse additional arguments (after the target)
-    let mut additional_args = Vec::new();
-    let mut current = current;
+    // Try to parse as identifier first to check for nested operations
+    if let Ok((first_name_rest, first_name)) = identifier(current) {
+        let after_first_name = skip_ws(first_name_rest);
+        
+        if is_upper_snake_case(&first_name) && after_first_name.starts_with('(') {
+            // This is a nested operation - add to path and recurse
+            path.push(first_name);
+            
+            // Parse the nested operation's arguments
+            let (rest, nested_expr) = parse_operation_call(after_first_name, path)?;
+            
+            // Extract args from nested operation
+            if let Expression::Operation { path: nested_path, args: nested_args } = nested_expr {
+                // Return with the full path and nested args as first args
+                all_args.extend(nested_args);
+                current = rest;
+                path = nested_path;
+            } else {
+                unreachable!("parse_operation_call always returns Operation");
+            }
+        } else {
+            // First argument is a regular expression - parse it from the beginning
+            let (rest, first_arg) = expression(current)?;
+            all_args.push(first_arg);
+            current = skip_ws(rest);
+        }
+    } else {
+        // First argument is not an identifier, parse as regular expression
+        let (rest, first_arg) = expression(current)?;
+        all_args.push(first_arg);
+        current = skip_ws(rest);
+    }
     
+    // Parse remaining arguments
     while current.starts_with(',') {
         let rest = skip_ws(&current[1..]);
         let (rest, arg) = expression(rest)?;
-        additional_args.push(arg);
+        all_args.push(arg);
         current = skip_ws(rest);
     }
     
@@ -1294,20 +1286,7 @@ fn parse_virtual_call(input: &str, virtual_op: VirtualOp) -> IResult<&str, Expre
     }
     let current = &current[1..];
     
-    // Resolve the virtual operation to a concrete OpKind
-    let op_kind = match virtual_op.resolve(target) {
-        Some(k) => k,
-        None => {
-            // Invalid combination of virtual op and target
-            return Err(nom::Err::Error(nom::error::Error::new(current, nom::error::ErrorKind::Tag)));
-        }
-    };
-    
-    // Combine target_args and additional_args
-    let mut all_args = target_args;
-    all_args.extend(additional_args);
-    
-    Ok((current, Expression::Operation { kind: op_kind, args: all_args }))
+    Ok((current, Expression::Operation { path, args: all_args }))
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
@@ -1472,9 +1451,9 @@ mod tests {
         let prog = result.unwrap();
         let main = &prog.functions[0];
         assert_eq!(main.body.statements.len(), 1);
-        // The virtual call should be parsed as an Operation with GpioWrite
-        if let Statement::Expr(Expression::Operation { kind, args }) = &main.body.statements[0] {
-            assert_eq!(*kind, embeem_ast::OpKind::GpioWrite);
+        // The virtual call should be parsed as an Operation with path ["WRITE", "GPIO"]
+        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+            assert_eq!(path, &["WRITE", "GPIO"]);
             assert_eq!(args.len(), 2);
         } else {
             panic!("Expected Operation expression");
@@ -1490,6 +1469,19 @@ mod tests {
         "#;
         let result = parse_program(src);
         assert!(result.is_ok());
+        let prog = result.unwrap();
+        let main = &prog.functions[0];
+        // Check that it's parsed as a let statement with Operation
+        if let Statement::Let { value, .. } = &main.body.statements[0] {
+            if let Expression::Operation { path, args } = value {
+                assert_eq!(path, &["READ", "GPIO"]);
+                assert_eq!(args.len(), 1);
+            } else {
+                panic!("Expected Operation expression");
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
     }
 
     #[test]
@@ -1503,6 +1495,23 @@ mod tests {
         "#;
         let result = parse_program(src);
         assert!(result.is_ok());
+        let prog = result.unwrap();
+        let main = &prog.functions[0];
+        
+        // Check first statement: START(PWM(0))
+        if let Statement::Expr(Expression::Operation { path, .. }) = &main.body.statements[0] {
+            assert_eq!(path, &["START", "PWM"]);
+        } else {
+            panic!("Expected Operation expression");
+        }
+        
+        // Check second statement: SET_DUTY_CYCLE(PWM(0), 128)
+        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[1] {
+            assert_eq!(path, &["SET_DUTY_CYCLE", "PWM"]);
+            assert_eq!(args.len(), 2); // 0 and 128
+        } else {
+            panic!("Expected Operation expression");
+        }
     }
 
     #[test]
@@ -1542,5 +1551,57 @@ mod tests {
         "#;
         let result = parse_program(src);
         assert!(result.is_ok());
+        let prog = result.unwrap();
+        let main = &prog.functions[0];
+        
+        // Check first statement: ENABLE(WDT())
+        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+            assert_eq!(path, &["ENABLE", "WDT"]);
+            assert_eq!(args.len(), 0);
+        } else {
+            panic!("Expected Operation expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_non_virtual_operation() {
+        let src = r#"
+            fn main() {
+                GPIO_WRITE(13, 1);
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        let main = &prog.functions[0];
+        
+        // Non-virtual operation should be parsed with single-element path
+        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+            assert_eq!(path, &["GPIO_WRITE"]);
+            assert_eq!(args.len(), 2);
+        } else {
+            panic!("Expected Operation expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_triple_nested_operation() {
+        let src = r#"
+            fn main() {
+                A(B(C(1)));
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        let main = &prog.functions[0];
+        
+        // Triple-nested operation: A(B(C(1))) -> path: ["A", "B", "C"], args: [1]
+        if let Statement::Expr(Expression::Operation { path, args }) = &main.body.statements[0] {
+            assert_eq!(path, &["A", "B", "C"]);
+            assert_eq!(args.len(), 1);
+        } else {
+            panic!("Expected Operation expression");
+        }
     }
 }

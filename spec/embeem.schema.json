@@ -82,7 +82,6 @@
         { "$ref": "#/definitions/unaryExpr" },
         { "$ref": "#/definitions/ifExpr" },
         { "$ref": "#/definitions/operationExpr" },
-        { "$ref": "#/definitions/virtualCallExpr" },
         { "$ref": "#/definitions/blockExpr" },
         { "$ref": "#/definitions/callExpr" },
         { "$ref": "#/definitions/indexExpr" }
@@ -155,15 +154,62 @@
     
     "operationExpr": {
       "type": "object",
+      "description": "An operation call with a path of UPPER_SNAKE_CASE segments. The path is built by collecting nested operation identifiers.",
       "properties": {
         "kind": { "const": "operation" },
-        "name": { "$ref": "#/definitions/operationName" },
+        "path": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/operationIdentifier" },
+          "minItems": 1,
+          "description": "Path segments collected from nested UPPER_SNAKE_CASE calls. E.g., WRITE(GPIO(13), 1) becomes ['WRITE', 'GPIO']"
+        },
         "arguments": {
           "type": "array",
-          "items": { "$ref": "#/definitions/expression" }
+          "items": { "$ref": "#/definitions/expression" },
+          "description": "All non-path arguments collected from the innermost call outward"
         }
       },
-      "required": ["kind", "name", "arguments"]
+      "required": ["kind", "path", "arguments"],
+      "examples": [
+        {
+          "kind": "operation",
+          "path": ["FSUB"],
+          "arguments": [
+            { "kind": "identifier", "name": "a" },
+            { "kind": "identifier", "name": "b" }
+          ],
+          "_comment": "FSUB(a, b)"
+        },
+        {
+          "kind": "operation",
+          "path": ["WRITE", "GPIO"],
+          "arguments": [
+            { "kind": "literal", "value": 13 },
+            { "kind": "literal", "value": 1 }
+          ],
+          "_comment": "WRITE(GPIO(13), 1)"
+        },
+        {
+          "kind": "operation",
+          "path": ["SET_FREQUENCY", "PWM"],
+          "arguments": [
+            { "kind": "literal", "value": 0 },
+            { "kind": "literal", "value": 1000 }
+          ],
+          "_comment": "SET_FREQUENCY(PWM(0), 1000)"
+        }
+      ],
+      "manglingScheme": {
+        "description": "Operation paths are mangled to C function names by: 1) joining segments with underscores, 2) converting to lowercase, 3) prepending the operation prefix (embeem_op_ by default)",
+        "examples": [
+          { "path": ["FSUB"], "mangledName": "embeem_op_fsub" },
+          { "path": ["GPIO_READ"], "mangledName": "embeem_op_gpio_read" },
+          { "path": ["READ", "GPIO"], "mangledName": "embeem_op_read_gpio" },
+          { "path": ["WRITE", "GPIO"], "mangledName": "embeem_op_write_gpio" },
+          { "path": ["SET_FREQUENCY", "PWM"], "mangledName": "embeem_op_set_frequency_pwm" }
+        ],
+        "note": "Single-segment paths for built-in C operators (ADD, SUB, MUL, etc.) may be inlined directly as C operators rather than function calls"
+      }
     },
     
     "blockExpr": {
@@ -344,85 +390,6 @@
       },
       "required": ["kind", "name", "type", "value"],
       "description": "Constant names must not use UPPER_SNAKE_CASE (reserved for operations)"
-    },
-    
-    "operationName": {
-      "enum": [
-        "ADD", "SUB", "MUL", "DIV", "MOD", "INC", "DEC", "NEG", "ABS",
-        "AND", "OR", "XOR", "NOT", "SHL", "SHR", "SAR", "ROL", "ROR",
-        "CMP", "TEST", "EQ", "NE", "LT", "LE", "GT", "GE",
-        "CALL", "RET", "NOP", "HALT", "SLEEP",
-        "LOAD", "STORE", "MOV", "PUSH", "POP", "SWAP", "MEMCPY", "MEMSET",
-        "SET_BIT", "CLEAR_BIT", "TOGGLE_BIT", "TEST_BIT", "COUNT_ONES", "COUNT_ZEROS", "FIND_FIRST_SET", "FIND_FIRST_ZERO",
-        "FADD", "FSUB", "FMUL", "FDIV", "FSQRT", "FABS", "FCMP",
-        "GPIO_READ", "GPIO_WRITE", "GPIO_TOGGLE", "GPIO_SET_MODE", "GPIO_READ_PORT", "GPIO_WRITE_PORT",
-        "ADC_READ", "ADC_START_CONVERSION", "ADC_READ_MULTI", "DAC_WRITE", "ADC_SET_RESOLUTION", "ADC_SET_REFERENCE",
-        "PWM_START", "PWM_STOP", "PWM_SET_DUTY_CYCLE", "PWM_SET_FREQUENCY", "PWM_SET_PULSE_WIDTH",
-        "TIMER_START", "TIMER_STOP", "TIMER_RESET", "TIMER_READ", "TIMER_SET_PERIOD", "TIMER_SET_COMPARE", "GET_MILLIS", "GET_MICROS", "DELAY_MS", "DELAY_US",
-        "UART_INIT", "UART_WRITE_BYTE", "UART_WRITE_BUFFER", "UART_READ_BYTE", "UART_READ_BUFFER", "UART_AVAILABLE", "UART_FLUSH", "UART_SET_BAUD_RATE",
-        "SPI_INIT", "SPI_TRANSFER", "SPI_TRANSFER_BUFFER", "SPI_SET_MODE", "SPI_SET_CLOCK", "SPI_SET_BIT_ORDER", "SPI_BEGIN_TRANSACTION", "SPI_END_TRANSACTION",
-        "I2C_INIT", "I2C_START", "I2C_STOP", "I2C_WRITE", "I2C_READ", "I2C_WRITE_TO", "I2C_READ_FROM", "I2C_SET_CLOCK", "I2C_SCAN",
-        "CAN_INIT", "CAN_SEND", "CAN_RECEIVE", "CAN_SET_FILTER", "CAN_SET_BITRATE",
-        "USB_INIT", "USB_CONNECT", "USB_DISCONNECT", "USB_WRITE", "USB_READ", "USB_AVAILABLE",
-        "WDT_ENABLE", "WDT_DISABLE", "WDT_RESET", "WDT_SET_TIMEOUT",
-        "DMA_INIT", "DMA_START", "DMA_STOP", "DMA_CONFIG", "DMA_SET_SOURCE", "DMA_SET_DESTINATION",
-        "EEPROM_READ", "EEPROM_WRITE", "EEPROM_UPDATE", "FLASH_READ", "FLASH_WRITE", "FLASH_ERASE",
-        "SET_POWER_MODE", "DISABLE_PERIPHERAL", "ENABLE_PERIPHERAL", "SET_CLOCK_SPEED", "ENTER_STANDBY", "ENTER_DEEP_SLEEP",
-        "RTC_INIT", "RTC_SET_TIME", "RTC_GET_TIME", "RTC_SET_ALARM", "RTC_SET_CALENDAR"
-      ]
-    },
-    
-    "virtualOperationName": {
-      "description": "Virtual operation names for the virtual function call syntax",
-      "enum": [
-        "READ", "WRITE", "INIT", "START", "STOP", "RESET", "TOGGLE",
-        "SET_MODE", "SET_FREQUENCY", "SET_DUTY_CYCLE", "SET_CLOCK",
-        "SET_BAUD_RATE", "TRANSFER", "AVAILABLE", "FLUSH",
-        "ENABLE", "DISABLE", "SET_TIMEOUT", "SET_PERIOD", "SET_COMPARE",
-        "SET_RESOLUTION", "SET_REFERENCE", "SET_PULSE_WIDTH"
-      ]
-    },
-    
-    "targetName": {
-      "description": "Target types for virtual function call syntax",
-      "enum": [
-        "GPIO", "ADC", "DAC", "PWM", "TIMER", "UART", "SPI", "I2C",
-        "CAN", "USB", "DMA", "WDT", "EEPROM", "FLASH", "RTC"
-      ]
-    },
-    
-    "virtualCallExpr": {
-      "type": "object",
-      "description": "Virtual function call syntax: OP(TARGET(args...), additional_args...)",
-      "properties": {
-        "kind": { "const": "virtual_call" },
-        "operation": { "$ref": "#/definitions/virtualOperationName" },
-        "target": { "$ref": "#/definitions/targetName" },
-        "targetArguments": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/expression" }
-        },
-        "additionalArguments": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/expression" }
-        }
-      },
-      "required": ["kind", "operation", "target", "targetArguments"],
-      "examples": [
-        {
-          "kind": "virtual_call",
-          "operation": "WRITE",
-          "target": "GPIO",
-          "targetArguments": [{ "kind": "literal", "value": 13 }],
-          "additionalArguments": [{ "kind": "literal", "value": 1 }]
-        },
-        {
-          "kind": "virtual_call",
-          "operation": "READ",
-          "target": "ADC",
-          "targetArguments": [{ "kind": "literal", "value": 0 }]
-        }
-      ]
     },
     
     "operationArity": {

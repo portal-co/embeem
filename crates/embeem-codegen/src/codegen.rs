@@ -1,11 +1,31 @@
 //! C code generator for Embeem.
+//!
+//! # Operation Mangling Scheme
+//!
+//! Operations in Embeem are represented as paths of UPPER_SNAKE_CASE segments.
+//! During code generation, these paths are mangled into C function names using
+//! the following scheme:
+//!
+//! 1. The path segments are joined with underscores
+//! 2. The result is converted to lowercase
+//! 3. The operation prefix (default: `embeem_op_`) is prepended
+//!
+//! ## Examples
+//!
+//! | Embeem Syntax | Path | Mangled Name |
+//! |---------------|------|--------------|
+//! | `FSUB(a, b)` | `["FSUB"]` | `embeem_op_fsub` |
+//! | `GPIO_READ(pin)` | `["GPIO_READ"]` | `embeem_op_gpio_read` |
+//! | `WRITE(GPIO(pin), val)` | `["WRITE", "GPIO"]` | `embeem_op_write_gpio` |
+//! | `READ(ADC(ch))` | `["READ", "ADC"]` | `embeem_op_read_adc` |
+//! | `A(B(C(x)))` | `["A", "B", "C"]` | `embeem_op_a_b_c` |
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use embeem_ast::{
-    BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal, OpKind,
+    BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal,
     PrimitiveType, Program, RangeDirection, Statement, Type, TypeContext, UnaryOp,
     infer_expression_type,
 };
@@ -509,8 +529,8 @@ impl CCodegen {
                 }
             }
 
-            Expression::Operation { kind, args } => {
-                self.emit_operation(*kind, args)
+            Expression::Operation { path, args } => {
+                self.emit_operation_path(path, args)
             }
 
             Expression::Call { function, args } => {
@@ -550,227 +570,65 @@ impl CCodegen {
         }
     }
 
-    fn emit_operation(&mut self, kind: OpKind, args: &[Expression]) -> Result<String, CodegenError> {
+    /// Emit an operation call with a path.
+    ///
+    /// Some common single-segment operations (like ADD, SUB, etc.) are optimized
+    /// to emit inline C operators for efficiency. All other operations use the
+    /// mangled function name.
+    fn emit_operation_path(&mut self, path: &[String], args: &[Expression]) -> Result<String, CodegenError> {
         let arg_strs: Result<Vec<_>, _> = args.iter().map(|a| self.expr_to_c(a)).collect();
         let arg_strs = arg_strs?;
 
-        // Generate the operation call
-        let op_name = self.op_kind_to_c_name(kind);
-        
-        // Some operations map directly to C operators
-        match kind {
-            OpKind::Add if arg_strs.len() == 2 => {
-                Ok(format!("({} + {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Sub if arg_strs.len() == 2 => {
-                Ok(format!("({} - {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Mul if arg_strs.len() == 2 => {
-                Ok(format!("({} * {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Div if arg_strs.len() == 2 => {
-                // Division by zero returns zero in Embeem
-                Ok(format!("({1} != 0 ? ({0}) / ({1}) : 0)", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Mod if arg_strs.len() == 2 => {
-                Ok(format!("({1} != 0 ? ({0}) % ({1}) : 0)", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Inc if arg_strs.len() == 1 => {
-                Ok(format!("({} + 1)", arg_strs[0]))
-            }
-            OpKind::Dec if arg_strs.len() == 1 => {
-                Ok(format!("({} - 1)", arg_strs[0]))
-            }
-            OpKind::Neg if arg_strs.len() == 1 => {
-                Ok(format!("(-{})", arg_strs[0]))
-            }
-            OpKind::Abs if arg_strs.len() == 1 => {
-                Ok(format!("(({0}) < 0 ? -({0}) : ({0}))", arg_strs[0]))
-            }
-            OpKind::And if arg_strs.len() == 2 => {
-                Ok(format!("({} & {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Or if arg_strs.len() == 2 => {
-                Ok(format!("({} | {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Xor if arg_strs.len() == 2 => {
-                Ok(format!("({} ^ {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Not if arg_strs.len() == 1 => {
-                Ok(format!("(~{})", arg_strs[0]))
-            }
-            OpKind::Shl if arg_strs.len() == 2 => {
-                Ok(format!("({} << {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Shr if arg_strs.len() == 2 => {
-                Ok(format!("({} >> {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Eq if arg_strs.len() == 2 => {
-                Ok(format!("({} == {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Ne if arg_strs.len() == 2 => {
-                Ok(format!("({} != {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Lt if arg_strs.len() == 2 => {
-                Ok(format!("({} < {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Le if arg_strs.len() == 2 => {
-                Ok(format!("({} <= {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Gt if arg_strs.len() == 2 => {
-                Ok(format!("({} > {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Ge if arg_strs.len() == 2 => {
-                Ok(format!("({} >= {})", arg_strs[0], arg_strs[1]))
-            }
-            OpKind::Nop => Ok("((void)0)".to_string()),
-            _ => {
-                // For other operations, generate a function call
-                Ok(format!("{}({})", op_name, arg_strs.join(", ")))
+        // For single-segment operations, check if we can use inline C operators
+        if path.len() == 1 {
+            let op = path[0].as_str();
+            match (op, arg_strs.len()) {
+                ("ADD", 2) => return Ok(format!("({} + {})", arg_strs[0], arg_strs[1])),
+                ("SUB", 2) => return Ok(format!("({} - {})", arg_strs[0], arg_strs[1])),
+                ("MUL", 2) => return Ok(format!("({} * {})", arg_strs[0], arg_strs[1])),
+                ("DIV", 2) => return Ok(format!("({1} != 0 ? ({0}) / ({1}) : 0)", arg_strs[0], arg_strs[1])),
+                ("MOD", 2) => return Ok(format!("({1} != 0 ? ({0}) % ({1}) : 0)", arg_strs[0], arg_strs[1])),
+                ("INC", 1) => return Ok(format!("({} + 1)", arg_strs[0])),
+                ("DEC", 1) => return Ok(format!("({} - 1)", arg_strs[0])),
+                ("NEG", 1) => return Ok(format!("(-{})", arg_strs[0])),
+                ("ABS", 1) => return Ok(format!("(({0}) < 0 ? -({0}) : ({0}))", arg_strs[0])),
+                ("AND", 2) => return Ok(format!("({} & {})", arg_strs[0], arg_strs[1])),
+                ("OR", 2) => return Ok(format!("({} | {})", arg_strs[0], arg_strs[1])),
+                ("XOR", 2) => return Ok(format!("({} ^ {})", arg_strs[0], arg_strs[1])),
+                ("NOT", 1) => return Ok(format!("(~{})", arg_strs[0])),
+                ("SHL", 2) => return Ok(format!("({} << {})", arg_strs[0], arg_strs[1])),
+                ("SHR", 2) => return Ok(format!("({} >> {})", arg_strs[0], arg_strs[1])),
+                ("EQ", 2) => return Ok(format!("({} == {})", arg_strs[0], arg_strs[1])),
+                ("NE", 2) => return Ok(format!("({} != {})", arg_strs[0], arg_strs[1])),
+                ("LT", 2) => return Ok(format!("({} < {})", arg_strs[0], arg_strs[1])),
+                ("LE", 2) => return Ok(format!("({} <= {})", arg_strs[0], arg_strs[1])),
+                ("GT", 2) => return Ok(format!("({} > {})", arg_strs[0], arg_strs[1])),
+                ("GE", 2) => return Ok(format!("({} >= {})", arg_strs[0], arg_strs[1])),
+                ("NOP", 0) => return Ok("((void)0)".to_string()),
+                _ => {}
             }
         }
+
+        // For all other operations, use the mangled function name
+        let op_name = self.mangle_operation_path(path);
+        Ok(format!("{}({})", op_name, arg_strs.join(", ")))
     }
 
-    fn op_kind_to_c_name(&self, kind: OpKind) -> String {
+    /// Mangle an operation path into a C function name.
+    ///
+    /// The mangling scheme is:
+    /// 1. Join path segments with underscores
+    /// 2. Convert to lowercase
+    /// 3. Prepend the operation prefix
+    ///
+    /// Examples:
+    /// - `["FSUB"]` -> `embeem_op_fsub`
+    /// - `["WRITE", "GPIO"]` -> `embeem_op_write_gpio`
+    /// - `["READ", "ADC"]` -> `embeem_op_read_adc`
+    fn mangle_operation_path(&self, path: &[String]) -> String {
         let prefix = &self.options.op_prefix;
-        match kind {
-            // Operations with inline implementations (use op_prefix)
-            OpKind::Add => format!("{}add", prefix),
-            OpKind::Sub => format!("{}sub", prefix),
-            OpKind::Mul => format!("{}mul", prefix),
-            OpKind::Div => format!("{}div", prefix),
-            OpKind::Mod => format!("{}mod", prefix),
-            OpKind::Inc => format!("{}inc", prefix),
-            OpKind::Dec => format!("{}dec", prefix),
-            OpKind::Neg => format!("{}neg", prefix),
-            OpKind::Abs => format!("{}abs", prefix),
-            OpKind::And => format!("{}and", prefix),
-            OpKind::Or => format!("{}or", prefix),
-            OpKind::Xor => format!("{}xor", prefix),
-            OpKind::Not => format!("{}not", prefix),
-            OpKind::Shl => format!("{}shl", prefix),
-            OpKind::Shr => format!("{}shr", prefix),
-            OpKind::Sar => format!("{}sar", prefix),
-            OpKind::Rol => format!("{}rol", prefix),
-            OpKind::Ror => format!("{}ror", prefix),
-            OpKind::Cmp => format!("{}cmp", prefix),
-            OpKind::Test => format!("{}test", prefix),
-            OpKind::Eq => format!("{}eq", prefix),
-            OpKind::Ne => format!("{}ne", prefix),
-            OpKind::Lt => format!("{}lt", prefix),
-            OpKind::Le => format!("{}le", prefix),
-            OpKind::Gt => format!("{}gt", prefix),
-            OpKind::Ge => format!("{}ge", prefix),
-            OpKind::Nop => format!("{}nop", prefix),
-            OpKind::SetBit => format!("{}set_bit", prefix),
-            OpKind::ClearBit => format!("{}clear_bit", prefix),
-            OpKind::ToggleBit => format!("{}toggle_bit", prefix),
-            OpKind::TestBit => format!("{}test_bit", prefix),
-            OpKind::CountOnes => format!("{}count_ones", prefix),
-            OpKind::CountZeros => format!("{}count_zeros", prefix),
-            OpKind::FindFirstSet => format!("{}find_first_set", prefix),
-            OpKind::FindFirstZero => format!("{}find_first_zero", prefix),
-            OpKind::FAdd => format!("{}fadd", prefix),
-            OpKind::FSub => format!("{}fsub", prefix),
-            OpKind::FMul => format!("{}fmul", prefix),
-            OpKind::FDiv => format!("{}fdiv", prefix),
-            OpKind::FSqrt => format!("{}fsqrt", prefix),
-            OpKind::FAbs => format!("{}fabs", prefix),
-            OpKind::FCmp => format!("{}fcmp", prefix),
-            OpKind::Halt => format!("{}halt", prefix),
-            OpKind::Sleep => format!("{}sleep", prefix),
-            // Platform-specific operations (use op_prefix but not defined inline)
-            OpKind::GpioRead => format!("{}gpio_read", prefix),
-            OpKind::GpioWrite => format!("{}gpio_write", prefix),
-            OpKind::GpioToggle => format!("{}gpio_toggle", prefix),
-            OpKind::GpioSetMode => format!("{}gpio_set_mode", prefix),
-            OpKind::GpioReadPort => format!("{}gpio_read_port", prefix),
-            OpKind::GpioWritePort => format!("{}gpio_write_port", prefix),
-            OpKind::AdcRead => format!("{}adc_read", prefix),
-            OpKind::AdcStartConversion => format!("{}adc_start_conversion", prefix),
-            OpKind::AdcReadMulti => format!("{}adc_read_multi", prefix),
-            OpKind::DacWrite => format!("{}dac_write", prefix),
-            OpKind::AdcSetResolution => format!("{}adc_set_resolution", prefix),
-            OpKind::AdcSetReference => format!("{}adc_set_reference", prefix),
-            OpKind::PwmStart => format!("{}pwm_start", prefix),
-            OpKind::PwmStop => format!("{}pwm_stop", prefix),
-            OpKind::PwmSetDutyCycle => format!("{}pwm_set_duty_cycle", prefix),
-            OpKind::PwmSetFrequency => format!("{}pwm_set_frequency", prefix),
-            OpKind::PwmSetPulseWidth => format!("{}pwm_set_pulse_width", prefix),
-            OpKind::TimerStart => format!("{}timer_start", prefix),
-            OpKind::TimerStop => format!("{}timer_stop", prefix),
-            OpKind::TimerReset => format!("{}timer_reset", prefix),
-            OpKind::TimerRead => format!("{}timer_read", prefix),
-            OpKind::TimerSetPeriod => format!("{}timer_set_period", prefix),
-            OpKind::TimerSetCompare => format!("{}timer_set_compare", prefix),
-            OpKind::GetMillis => format!("{}get_millis", prefix),
-            OpKind::GetMicros => format!("{}get_micros", prefix),
-            OpKind::DelayMs => format!("{}delay_ms", prefix),
-            OpKind::DelayUs => format!("{}delay_us", prefix),
-            OpKind::UartInit => format!("{}uart_init", prefix),
-            OpKind::UartWriteByte => format!("{}uart_write_byte", prefix),
-            OpKind::UartWriteBuffer => format!("{}uart_write_buffer", prefix),
-            OpKind::UartReadByte => format!("{}uart_read_byte", prefix),
-            OpKind::UartReadBuffer => format!("{}uart_read_buffer", prefix),
-            OpKind::UartAvailable => format!("{}uart_available", prefix),
-            OpKind::UartFlush => format!("{}uart_flush", prefix),
-            OpKind::UartSetBaudRate => format!("{}uart_set_baud_rate", prefix),
-            OpKind::SpiInit => format!("{}spi_init", prefix),
-            OpKind::SpiTransfer => format!("{}spi_transfer", prefix),
-            OpKind::SpiTransferBuffer => format!("{}spi_transfer_buffer", prefix),
-            OpKind::SpiSetMode => format!("{}spi_set_mode", prefix),
-            OpKind::SpiSetClock => format!("{}spi_set_clock", prefix),
-            OpKind::SpiSetBitOrder => format!("{}spi_set_bit_order", prefix),
-            OpKind::SpiBeginTransaction => format!("{}spi_begin_transaction", prefix),
-            OpKind::SpiEndTransaction => format!("{}spi_end_transaction", prefix),
-            OpKind::I2cInit => format!("{}i2c_init", prefix),
-            OpKind::I2cStart => format!("{}i2c_start", prefix),
-            OpKind::I2cStop => format!("{}i2c_stop", prefix),
-            OpKind::I2cWrite => format!("{}i2c_write", prefix),
-            OpKind::I2cRead => format!("{}i2c_read", prefix),
-            OpKind::I2cWriteTo => format!("{}i2c_write_to", prefix),
-            OpKind::I2cReadFrom => format!("{}i2c_read_from", prefix),
-            OpKind::I2cSetClock => format!("{}i2c_set_clock", prefix),
-            OpKind::I2cScan => format!("{}i2c_scan", prefix),
-            OpKind::CanInit => format!("{}can_init", prefix),
-            OpKind::CanSend => format!("{}can_send", prefix),
-            OpKind::CanReceive => format!("{}can_receive", prefix),
-            OpKind::CanSetFilter => format!("{}can_set_filter", prefix),
-            OpKind::CanSetBitrate => format!("{}can_set_bitrate", prefix),
-            OpKind::UsbInit => format!("{}usb_init", prefix),
-            OpKind::UsbConnect => format!("{}usb_connect", prefix),
-            OpKind::UsbDisconnect => format!("{}usb_disconnect", prefix),
-            OpKind::UsbWrite => format!("{}usb_write", prefix),
-            OpKind::UsbRead => format!("{}usb_read", prefix),
-            OpKind::UsbAvailable => format!("{}usb_available", prefix),
-            OpKind::WdtEnable => format!("{}wdt_enable", prefix),
-            OpKind::WdtDisable => format!("{}wdt_disable", prefix),
-            OpKind::WdtReset => format!("{}wdt_reset", prefix),
-            OpKind::WdtSetTimeout => format!("{}wdt_set_timeout", prefix),
-            OpKind::DmaInit => format!("{}dma_init", prefix),
-            OpKind::DmaStart => format!("{}dma_start", prefix),
-            OpKind::DmaStop => format!("{}dma_stop", prefix),
-            OpKind::DmaConfig => format!("{}dma_config", prefix),
-            OpKind::DmaSetSource => format!("{}dma_set_source", prefix),
-            OpKind::DmaSetDestination => format!("{}dma_set_destination", prefix),
-            OpKind::EepromRead => format!("{}eeprom_read", prefix),
-            OpKind::EepromWrite => format!("{}eeprom_write", prefix),
-            OpKind::EepromUpdate => format!("{}eeprom_update", prefix),
-            OpKind::FlashRead => format!("{}flash_read", prefix),
-            OpKind::FlashWrite => format!("{}flash_write", prefix),
-            OpKind::FlashErase => format!("{}flash_erase", prefix),
-            OpKind::SetPowerMode => format!("{}set_power_mode", prefix),
-            OpKind::DisablePeripheral => format!("{}disable_peripheral", prefix),
-            OpKind::EnablePeripheral => format!("{}enable_peripheral", prefix),
-            OpKind::SetClockSpeed => format!("{}set_clock_speed", prefix),
-            OpKind::EnterStandby => format!("{}enter_standby", prefix),
-            OpKind::EnterDeepSleep => format!("{}enter_deep_sleep", prefix),
-            OpKind::RtcInit => format!("{}rtc_init", prefix),
-            OpKind::RtcSetTime => format!("{}rtc_set_time", prefix),
-            OpKind::RtcGetTime => format!("{}rtc_get_time", prefix),
-            OpKind::RtcSetAlarm => format!("{}rtc_set_alarm", prefix),
-            OpKind::RtcSetCalendar => format!("{}rtc_set_calendar", prefix),
-        }
+        let joined = path.join("_").to_lowercase();
+        format!("{}{}", prefix, joined)
     }
 
     /// Emit a block expression using GCC statement expression syntax: `({ ... })`

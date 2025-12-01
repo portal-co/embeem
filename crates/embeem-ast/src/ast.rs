@@ -4,8 +4,6 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::OpKind;
-
 /// A complete Embeem program.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Program {
@@ -170,9 +168,14 @@ pub enum Expression {
         then_branch: Block,
         else_branch: Block,
     },
-    /// Operation call (e.g., GPIO_READ(pin)).
+    /// Operation call (e.g., GPIO_READ(pin) or WRITE(GPIO(pin), value)).
+    ///
+    /// Operations are represented as a path of UPPER_SNAKE_CASE segments.
+    /// - `FSUB(a, b)` is stored as `path: ["FSUB"], args: [a, b]`
+    /// - `WRITE(GPIO(pin), value)` is stored as `path: ["WRITE", "GPIO"], args: [pin, value]`
+    /// - Deeper nesting is supported: `A(B(C(x), y), z)` -> `path: ["A", "B", "C"], args: [x, y, z]`
     Operation {
-        kind: OpKind,
+        path: Vec<String>,
         args: Vec<Expression>,
     },
     /// Function call.
