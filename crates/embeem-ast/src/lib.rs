@@ -22,6 +22,8 @@ mod ast;
 mod expr;
 #[cfg(feature = "alloc")]
 mod ops;
+#[cfg(feature = "alloc")]
+mod pretty;
 
 #[cfg(all(feature = "alloc", feature = "inference"))]
 mod infer;
@@ -32,6 +34,8 @@ pub use ast::*;
 pub use expr::Expr;
 #[cfg(feature = "alloc")]
 pub use ops::{is_upper_snake_case, is_valid_user_identifier, *};
+#[cfg(feature = "alloc")]
+pub use pretty::{pretty_print_program, PrettyPrint, PrettyPrintContext};
 
 #[cfg(all(feature = "alloc", feature = "inference"))]
 pub use infer::*;
