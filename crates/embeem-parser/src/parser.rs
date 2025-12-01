@@ -1484,6 +1484,59 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_repeat_variable_bound() {
+        // Totality is preserved because count is immutable
+        let src = r#"
+            fn process(count: u32) {
+                repeat count {
+                    GPIO_TOGGLE(13);
+                }
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        let func = &prog.functions[0];
+        // Check that the repeat statement has a variable bound
+        if let Statement::Repeat { count, .. } = &func.body.statements[0] {
+            if let Expression::Identifier(name) = count {
+                assert_eq!(name, "count");
+            } else {
+                panic!("Expected identifier for repeat count");
+            }
+        } else {
+            panic!("Expected Repeat statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_while_variable_max() {
+        // Totality is preserved because max_iter is immutable
+        let src = r#"
+            fn search(max_iter: u32) {
+                let mut found = false;
+                while not found max max_iter {
+                    found = CHECK_CONDITION();
+                }
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        let func = &prog.functions[0];
+        // Check that the while statement has a variable max
+        if let Statement::While { max_iterations, .. } = &func.body.statements[1] {
+            if let Expression::Identifier(name) = max_iterations {
+                assert_eq!(name, "max_iter");
+            } else {
+                panic!("Expected identifier for max_iterations");
+            }
+        } else {
+            panic!("Expected While statement");
+        }
+    }
+
+    #[test]
     fn test_parse_binary_ops() {
         let src = r#"
             fn main() {

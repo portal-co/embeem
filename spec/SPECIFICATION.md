@@ -281,10 +281,16 @@ for i in 10 downto 1 {
 #### 6.2.2 Repeat Loop
 
 ```
-REPEAT_LOOP ::= 'repeat' CONST_EXPR BLOCK
+REPEAT_LOOP ::= 'repeat' BOUND_EXPR BLOCK
+
+BOUND_EXPR  ::= CONST_EXPR | IMMUTABLE_VAR
 ```
 
-Executes the block exactly `CONST_EXPR` times.
+Executes the block exactly `BOUND_EXPR` times. The bound can be either a compile-time constant or an immutable variable.
+
+**Constraints**:
+- If the bound is a variable, it must be immutable (not declared with `mut`)
+- The bound value is captured at loop entry and cannot change during iteration
 
 **Example**:
 ```embeem
@@ -292,17 +298,30 @@ repeat 5 {
     GPIO_TOGGLE(pin);
     DELAY_MS(500);
 }
+
+// With immutable variable
+let count: u32 = get_iteration_count();
+repeat count {
+    process_item();
+}
+```
 ```
 
 #### 6.2.3 Bounded While Loop
 
 ```
-BOUNDED_WHILE ::= 'while' EXPR 'max' CONST_EXPR BLOCK
+BOUNDED_WHILE ::= 'while' EXPR 'max' BOUND_EXPR BLOCK
+
+BOUND_EXPR    ::= CONST_EXPR | IMMUTABLE_VAR
 ```
 
-Executes while condition is true, with a maximum iteration count.
+Executes while condition is true, with a maximum iteration count. The bound can be either a compile-time constant or an immutable variable.
 
 **Semantics**: If the maximum is reached, the loop exits regardless of condition.
+
+**Constraints**:
+- If the bound is a variable, it must be immutable (not declared with `mut`)
+- The bound value is captured at loop entry and cannot change during iteration
 
 **Example**:
 ```embeem
@@ -313,6 +332,12 @@ while not found max 100 {
         found = true;
     }
     i = i + 1;
+}
+
+// With immutable variable bound
+let max_attempts: u32 = calculate_timeout();
+while not connected max max_attempts {
+    try_connect();
 }
 ```
 
@@ -839,8 +864,9 @@ assign_stmt = IDENT "=" expr ";" ;
 expr_stmt   = expr ";" ;
 if_stmt     = "if" expr block [ "else" ( block | if_stmt ) ] ;
 for_stmt    = "for" IDENT "in" range block ;
-repeat_stmt = "repeat" const_expr block ;
-while_stmt  = "while" expr "max" const_expr block ;
+repeat_stmt = "repeat" bound_expr block ;
+while_stmt  = "while" expr "max" bound_expr block ;
+bound_expr  = const_expr | IDENT ;  (* Must be compile-time constant or immutable variable *)
 range       = const_expr ( "to" | "downto" ) const_expr ;
 
 (* Expressions *)

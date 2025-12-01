@@ -31,10 +31,12 @@ while (condition) { }      // May never terminate
 
 | Construct | Bound | Termination Guarantee |
 |-----------|-------|----------------------|
-| `for i in a to b` | `|b - a + 1|` | Exactly `|b - a + 1|` iterations |
-| `for i in a downto b` | `|a - b + 1|` | Exactly `|a - b + 1|` iterations |
+| `for i in a to b` | `\|b - a + 1\|` | Exactly `\|b - a + 1\|` iterations |
+| `for i in a downto b` | `\|a - b + 1\|` | Exactly `\|a - b + 1\|` iterations |
 | `repeat n` | `n` | Exactly `n` iterations |
 | `while cond max m` | `m` | At most `m` iterations |
+
+**Note**: The bounds `n` and `m` may be compile-time constants or immutable variables. When an immutable variable is used, its value is captured at loop entry and cannot change during iteration, preserving the termination guarantee.
 
 ### 2.2 No General Recursion
 
@@ -76,9 +78,24 @@ An Embeem program consists of:
 
 *Proof*: Functions in Embeem are defined sequentially. A function $f_i$ can only call functions $f_j$ where $j < i$ (functions defined earlier). Since $j < i$ implies there's no path from $f_j$ back to $f_i$, cycles are impossible. ∎
 
-### 3.3 Loop Termination
+### 3.3 Immutable Variable Invariant
 
-**Lemma 3.2**: Every loop construct in Embeem terminates.
+**Definition 3.2 (Immutable Variable)**: A variable declared without `mut` is *immutable*. Its value, once assigned, cannot be modified.
+
+**Lemma 3.3 (Bound Stability)**: If a loop bound expression $b$ consists solely of literals and immutable variables, then $b$ evaluates to a fixed finite value that does not change during loop execution.
+
+*Proof*: 
+1. Literals are constant by definition
+2. Immutable variables cannot appear on the left-hand side of an assignment
+3. The loop body cannot contain assignments to immutable variables (type error)
+4. Therefore, evaluating $b$ at loop entry yields the same result as at any point during execution
+5. Since all integer types in Embeem are finite (u8 to u64, i8 to i64), $b$ is bounded by $2^{64}$
+
+∎
+
+### 3.4 Loop Termination
+
+**Lemma 3.4**: Every loop construct in Embeem terminates.
 
 *Proof by cases*:
 
@@ -97,19 +114,25 @@ An Embeem program consists of:
 - This is a finite natural number. ∎
 
 **Case 3: `repeat n { body }`**
-- The body is executed exactly `n` times
-- `n` is a compile-time constant natural number
-- Termination after `n` iterations is guaranteed. ∎
+- The bound `n` is either a compile-time constant or an immutable variable
+- If `n` is an immutable variable, its value is determined before the loop starts
+- The body is executed exactly `n` times, where `n` is the value at loop entry
+- Since immutable variables cannot be modified, `n` remains fixed throughout
+- This is a finite natural number (bounded by the integer type). ∎
 
 **Case 4: `while cond max m { body }`**
 - Let $c_i$ be the condition value at iteration $i$
 - The loop exits if $c_i = \text{false}$ OR $i \geq m$
-- Since the second condition is guaranteed to be true after $m$ iterations, the loop executes at most $m$ times
-- $m$ is a compile-time constant natural number. ∎
+- The bound `m` is either a compile-time constant or an immutable variable
+- If `m` is an immutable variable, its value $m_0$ is captured at loop entry
+- Since immutable variables cannot be modified, $m_0$ remains fixed
+- The second condition is guaranteed to be true after $m_0$ iterations
+- Therefore, the loop executes at most $m_0$ times
+- $m_0$ is a finite natural number (bounded by the integer type). ∎
 
-### 3.4 Expression Termination
+### 3.5 Expression Termination
 
-**Lemma 3.3**: Every expression in Embeem terminates.
+**Lemma 3.5**: Every expression in Embeem terminates.
 
 *Proof*: Expressions in Embeem consist of:
 
@@ -121,29 +144,29 @@ An Embeem program consists of:
 
 Since all expression forms terminate, the lemma holds. ∎
 
-### 3.5 Statement Termination
+### 3.6 Statement Termination
 
-**Lemma 3.4**: Every statement in Embeem terminates.
+**Lemma 3.6**: Every statement in Embeem terminates.
 
 *Proof*: Statements in Embeem are:
 
-1. **Let binding**: `let x = e;` - expression `e` terminates (Lemma 3.3)
-2. **Assignment**: `x = e;` - expression `e` terminates (Lemma 3.3)
-3. **Expression statement**: `e;` - terminates (Lemma 3.3)
-4. **If statement**: Condition and branches terminate (Lemma 3.3)
-5. **Loop statements**: Terminate (Lemma 3.2)
+1. **Let binding**: `let x = e;` - expression `e` terminates (Lemma 3.5)
+2. **Assignment**: `x = e;` - expression `e` terminates (Lemma 3.5)
+3. **Expression statement**: `e;` - terminates (Lemma 3.5)
+4. **If statement**: Condition and branches terminate (Lemma 3.5)
+5. **Loop statements**: Terminate (Lemma 3.4)
 6. **Block**: Sequence of statements; each terminates; block terminates
 
 ∎
 
-### 3.6 Main Theorem
+### 3.7 Main Theorem
 
-**Theorem 3.5 (Totality without External Functions)**: Every well-typed Embeem program *without external functions* terminates.
+**Theorem 3.7 (Totality without External Functions)**: Every well-typed Embeem program *without external functions* terminates.
 
 *Proof*: 
 1. A program's execution starts at `main`
 2. `main` is a function with a body (sequence of statements)
-3. Each statement in `main` terminates (Lemma 3.4)
+3. Each statement in `main` terminates (Lemma 3.6)
 4. Any function called from `main` is earlier in the call DAG
 5. By strong induction on the call DAG depth, all called functions terminate
 6. Therefore, `main` terminates
@@ -151,7 +174,7 @@ Since all expression forms terminate, the lemma holds. ∎
 
 ∎
 
-### 3.7 External Functions
+### 3.8 External Functions
 
 External functions are provided by the environment and declared without a body:
 
@@ -160,15 +183,15 @@ extern fn get_sensor_value(channel: u8) -> i32;
 extern fn set_led(pin: u8, value: bool);
 ```
 
-**Definition 3.6 (Total External Function)**: An external function $e$ is *total* if every call to $e$ with valid arguments returns in finite time.
+**Definition 3.8 (Total External Function)**: An external function $e$ is *total* if every call to $e$ with valid arguments returns in finite time.
 
-**Theorem 3.7 (Conditional Totality with External Functions)**: An Embeem program $P$ with external functions $E = \{e_1, e_2, \ldots, e_k\}$ terminates *if and only if* all external functions in $E$ are total.
+**Theorem 3.9 (Conditional Totality with External Functions)**: An Embeem program $P$ with external functions $E = \{e_1, e_2, \ldots, e_k\}$ terminates *if and only if* all external functions in $E$ are total.
 
 *Proof (⟹)*: 
 If all external functions terminate, then:
-1. Lemma 3.3 extends: calls to external functions terminate by assumption
+1. Lemma 3.5 extends: calls to external functions terminate by assumption
 2. All other lemmas hold unchanged
-3. By Theorem 3.5's proof structure, the program terminates
+3. By Theorem 3.7's proof structure, the program terminates
 
 *Proof (⟸)*:
 If some external function $e_i$ does not terminate:
@@ -178,15 +201,15 @@ If some external function $e_i$ does not terminate:
 
 ∎
 
-**Corollary 3.8 (Bounds with External Functions)**: If external function $e_i$ has worst-case execution time $T_i$, then the program's WCET can be computed by substituting $T_i$ for each call to $e_i$.
+**Corollary 3.10 (Bounds with External Functions)**: If external function $e_i$ has worst-case execution time $T_i$, then the program's WCET can be computed by substituting $T_i$ for each call to $e_i$.
 
-### 3.8 Pure Embeem Programs
+### 3.9 Pure Embeem Programs
 
-**Definition 3.9 (Pure Embeem Program)**: A program is *pure* if it contains no external function declarations.
+**Definition 3.11 (Pure Embeem Program)**: A program is *pure* if it contains no external function declarations.
 
-**Theorem 3.10 (Unconditional Totality)**: Every pure Embeem program terminates unconditionally.
+**Theorem 3.12 (Unconditional Totality)**: Every pure Embeem program terminates unconditionally.
 
-*Proof*: Direct consequence of Theorem 3.5. ∎
+*Proof*: Direct consequence of Theorem 3.7. ∎
 
 This distinction is important for embedded systems:
 - **Pure programs**: Guaranteed to terminate, suitable for safety-critical applications

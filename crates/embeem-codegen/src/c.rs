@@ -959,6 +959,42 @@ mod tests {
     }
 
     #[test]
+    fn test_repeat_variable_bound() {
+        // Totality is preserved because iterations is an immutable parameter
+        let src = r#"
+            fn blink_n_times(iterations: u32) {
+                repeat iterations {
+                    GPIO_TOGGLE(13);
+                    DELAY_MS(500);
+                }
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        // Check that the variable is used in the loop bound
+        assert!(c_code.contains("< iterations"), "Expected variable bound in for loop, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_while_variable_max() {
+        // Totality is preserved because max_attempts is an immutable parameter
+        let src = r#"
+            fn wait_for_input(max_attempts: u32) -> bool {
+                let mut count: u32 = 0;
+                while UART_AVAILABLE(0) == 0 max max_attempts {
+                    count = count + 1;
+                    DELAY_MS(10);
+                }
+                count < max_attempts
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        // Check that the variable is used in the max iteration check
+        assert!(c_code.contains("max_attempts"), "Expected variable max in while loop, got:\n{}", c_code);
+    }
+
+    #[test]
     fn test_for_loop() {
         let src = r#"
             fn main() {
