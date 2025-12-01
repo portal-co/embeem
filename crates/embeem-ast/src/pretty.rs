@@ -46,38 +46,12 @@ impl PrettyPrintContext {
         self.extern_fn_arities.get(name).copied()
     }
 
-    /// Get the arity of an operation by name.
+    /// Get the arity of an operation segment by name.
     ///
-    /// Note: For path-based operations, the arity depends on the full path,
-    /// not just a single segment. This function only provides arity for
-    /// primitive single-segment operations (ADD, SUB, etc.).
-    pub fn operation_arity(name: &str) -> Option<usize> {
-        op_kind_from_str(name).and_then(|op| {
-            if op.is_primitive() {
-                // Primitive operations have fixed arities
-                Some(match op {
-                    // Nullary
-                    crate::ops::OpKind::Nop
-                    | crate::ops::OpKind::Halt
-                    | crate::ops::OpKind::Sleep => 0,
-
-                    // Unary
-                    crate::ops::OpKind::Inc
-                    | crate::ops::OpKind::Dec
-                    | crate::ops::OpKind::Neg
-                    | crate::ops::OpKind::Abs
-                    | crate::ops::OpKind::Not
-                    | crate::ops::OpKind::FSqrt
-                    | crate::ops::OpKind::FAbs => 1,
-
-                    // Binary (all other primitives)
-                    _ => 2,
-                })
-            } else {
-                // Non-primitive segments don't have standalone arity
-                None
-            }
-        })
+    /// Returns the arity from `OpKind::arity()` if the segment is known,
+    /// or `None` for unknown segments.
+    pub fn segment_arity(name: &str) -> Option<usize> {
+        op_kind_from_str(name).map(|op| op.arity())
     }
 
     fn indent_str(&self) -> String {
@@ -376,84 +350,46 @@ impl PrettyPrint for Expression {
 /// Operations are stored as flat paths like `["WRITE", "GPIO"]` with args `[pin, value]`.
 /// This function reconstructs the nested syntax: `WRITE(GPIO(pin), value)`.
 ///
-/// The algorithm uses operation arities to determine how many arguments belong
-/// to each level of nesting.
+/// The algorithm works from the innermost segment outward:
+/// - Each segment consumes its arity worth of arguments
+/// - The innermost segment (or extern fn) consumes from the front of args
+/// - Each outer segment wraps the inner result and consumes additional args
 fn pretty_print_operation(
     path: &[String],
     extern_fn: Option<&str>,
     args: &[Expression],
     ctx: &mut PrettyPrintContext,
 ) -> String {
-    if path.is_empty() {
+    if path.is_empty() && extern_fn.is_none() {
         // Edge case: no path, just return args as a tuple
         let arg_strs: Vec<_> = args.iter().map(|a| a.pretty_print(ctx)).collect();
         return format!("({})", arg_strs.join(", "));
     }
 
-    // Get arities for each segment in the path
-    let mut arities: Vec<usize> = Vec::new();
-    for seg in path {
-        let arity = PrettyPrintContext::operation_arity(seg).unwrap_or(1);
-        arities.push(arity);
+    let mut args_iter = args.iter();
+
+    // Handle single-segment case (primitive operations)
+    if path.len() == 1 && extern_fn.is_none() {
+        let seg = &path[0];
+        let arg_strs: Vec<_> = args.iter().map(|a| a.pretty_print(ctx)).collect();
+        return format!("{}({})", seg, arg_strs.join(", "));
     }
 
-    // If there's an extern function, get its arity
-    let extern_arity = extern_fn
-        .and_then(|name| ctx.extern_fn_arity(name))
-        .unwrap_or(0);
-
-    // Build the nested expression from inside out
-    // The innermost operation is the last in the path
-    //
-    // For path ["WRITE", "GPIO"] with args [pin, value]:
-    //   - GPIO has arity 1, takes 1 arg from the front
-    //   - WRITE has arity 2, but arg[0] is the nested GPIO(pin), so it takes 1 more from remaining
-    //
-    // However, the current storage model is:
-    //   - path captures the nesting structure
-    //   - args are the leaf arguments in order
-    //
-    // We need to distribute args across the nesting levels:
-    //   - Innermost segment gets (arity - 1) args (since one "slot" is the nested result or it's terminal)
-    //   - Actually, the model is simpler: each segment except the outermost contributes to the arg of the next
-    //
-    // Let's think about it differently:
-    // For WRITE(GPIO(pin), value):
-    //   - This is WRITE with 2 args: GPIO(pin) and value
-    //   - GPIO is an operation with 1 arg: pin
-    //   - Flattened: path = ["WRITE", "GPIO"], args = [pin, value]
-    //
-    // For READ(ADC(channel)):
-    //   - This is READ with 1 arg: ADC(channel)
-    //   - ADC has 1 arg: channel
-    //   - Flattened: path = ["READ", "ADC"], args = [channel]
-    //
-    // General rule:
-    //   - Start from the innermost (last) segment
-    //   - It takes its arity args from the front of the arg list
-    //   - The result becomes the first arg of the next outer segment
-    //   - That segment takes (arity - 1) more args from the remaining list
-    //   - Continue until the outermost segment
-
-    let mut args_iter = args.iter().peekable();
+    // Build from innermost to outermost
+    // The innermost is either the extern_fn or the last path segment
     
-    // Handle the innermost segment (or extern fn if present)
     let innermost_str = if let Some(ext_fn) = extern_fn {
         // Extern function is the innermost
-        let ext_args: Vec<_> = (0..extern_arity)
+        let ext_arity = ctx.extern_fn_arity(ext_fn).unwrap_or(0);
+        let ext_args: Vec<_> = (0..ext_arity)
             .filter_map(|_| args_iter.next())
             .map(|a| a.pretty_print(ctx))
             .collect();
         format!("{}({})", ext_fn, ext_args.join(", "))
-    } else if path.len() == 1 {
-        // Single segment, it gets all args
-        let seg = &path[0];
-        let arg_strs: Vec<_> = args.iter().map(|a| a.pretty_print(ctx)).collect();
-        return format!("{}({})", seg, arg_strs.join(", "));
     } else {
-        // Multiple segments - innermost is last in path
+        // Last path segment is the innermost
         let innermost = &path[path.len() - 1];
-        let arity = arities[path.len() - 1];
+        let arity = PrettyPrintContext::segment_arity(innermost).unwrap_or(1);
         let inner_args: Vec<_> = (0..arity)
             .filter_map(|_| args_iter.next())
             .map(|a| a.pretty_print(ctx))
@@ -461,29 +397,28 @@ fn pretty_print_operation(
         format!("{}({})", innermost, inner_args.join(", "))
     };
 
-    // Build outward through remaining segments
-    let segments_to_process = if extern_fn.is_some() {
+    // Determine which segments to wrap around the innermost
+    let outer_segments = if extern_fn.is_some() {
         &path[..]
     } else {
         &path[..path.len() - 1]
     };
 
+    // Build outward through remaining segments (from inside to outside)
     let mut current = innermost_str;
     
-    // Process from second-to-last to first (inside out, but we have the innermost already)
-    for (i, seg) in segments_to_process.iter().enumerate().rev() {
-        let arity = arities[i];
-        // This segment's first "arg" is the current nested expression
-        // It takes (arity - 1) more args from the iterator
-        let remaining_args: Vec<_> = (0..(arity.saturating_sub(1)))
+    for seg in outer_segments.iter().rev() {
+        let arity = PrettyPrintContext::segment_arity(seg).unwrap_or(0);
+        // This segment wraps the current result and takes `arity` additional args
+        let extra_args: Vec<_> = (0..arity)
             .filter_map(|_| args_iter.next())
             .map(|a| a.pretty_print(ctx))
             .collect();
         
-        if remaining_args.is_empty() {
+        if extra_args.is_empty() {
             current = format!("{}({})", seg, current);
         } else {
-            current = format!("{}({}, {})", seg, current, remaining_args.join(", "));
+            current = format!("{}({}, {})", seg, current, extra_args.join(", "));
         }
     }
 

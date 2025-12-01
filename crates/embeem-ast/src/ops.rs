@@ -741,4 +741,160 @@ impl OpKind {
                 | OpKind::FCmp
         )
     }
+
+    /// Get the arity of this operation segment.
+    ///
+    /// The arity represents how many arguments this segment consumes:
+    /// - For primitive operations (ADD, SUB, etc.), this is the total argument count
+    /// - For actions (READ, WRITE, etc.), this is the number of *extra* arguments
+    ///   beyond the nested target (0 for READ, 1 for WRITE, etc.)
+    /// - For targets (GPIO, ADC, etc.), this is typically 1 (the channel/pin)
+    /// - For modifiers, this varies based on the property
+    ///
+    /// # Examples
+    /// - `READ(GPIO(pin))`: READ has arity 0 (no extra args), GPIO has arity 1
+    /// - `WRITE(GPIO(pin), value)`: WRITE has arity 1 (the value), GPIO has arity 1
+    /// - `ADD(a, b)`: ADD has arity 2 (both operands)
+    pub fn arity(self) -> usize {
+        match self {
+            // ===== Actions =====
+            // Actions that only take a target, no extra args
+            OpKind::Read
+            | OpKind::Init
+            | OpKind::Start
+            | OpKind::Stop
+            | OpKind::Reset
+            | OpKind::Toggle
+            | OpKind::Enable
+            | OpKind::Disable
+            | OpKind::Receive
+            | OpKind::Scan
+            | OpKind::Connect
+            | OpKind::Disconnect
+            | OpKind::Flush
+            | OpKind::Available
+            | OpKind::Erase
+            | OpKind::Begin
+            | OpKind::End
+            | OpKind::Get
+            | OpKind::Find
+            | OpKind::Count
+            | OpKind::Clear => 0,
+
+            // Actions that take a target + 1 extra arg (value, data, etc.)
+            OpKind::Write
+            | OpKind::Transfer
+            | OpKind::Send
+            | OpKind::Update
+            | OpKind::Config
+            | OpKind::Enter
+            | OpKind::Set
+            | OpKind::Test
+            | OpKind::Delay => 1,
+
+            // ===== Targets (peripherals) =====
+            // Most targets take 1 arg (pin, channel, bus number, etc.)
+            OpKind::Gpio
+            | OpKind::Port
+            | OpKind::Adc
+            | OpKind::Dac
+            | OpKind::Pwm
+            | OpKind::Timer
+            | OpKind::Uart
+            | OpKind::Spi
+            | OpKind::I2c
+            | OpKind::Can
+            | OpKind::Usb
+            | OpKind::Dma
+            | OpKind::Eeprom
+            | OpKind::Flash
+            | OpKind::Rtc
+            | OpKind::Peripheral => 1,
+
+            // Watchdog typically has no channel argument
+            OpKind::Wdt => 0,
+
+            // ===== Modifiers/Properties =====
+            // Properties that are just qualifiers (no extra args)
+            OpKind::Mode
+            | OpKind::Frequency
+            | OpKind::DutyCycle
+            | OpKind::PulseWidth
+            | OpKind::Period
+            | OpKind::Compare
+            | OpKind::BaudRate
+            | OpKind::Clock
+            | OpKind::ClockSpeed
+            | OpKind::BitOrder
+            | OpKind::Filter
+            | OpKind::Bitrate
+            | OpKind::Timeout
+            | OpKind::Source
+            | OpKind::Destination
+            | OpKind::Resolution
+            | OpKind::Reference
+            | OpKind::PowerMode
+            | OpKind::Time
+            | OpKind::Alarm
+            | OpKind::Calendar
+            | OpKind::Millis
+            | OpKind::Micros
+            | OpKind::Ms
+            | OpKind::Us
+            | OpKind::Byte
+            | OpKind::Buffer
+            | OpKind::Multi
+            | OpKind::Conversion
+            | OpKind::Transaction
+            | OpKind::Bit
+            | OpKind::Ones
+            | OpKind::Zeros
+            | OpKind::First
+            | OpKind::Standby
+            | OpKind::DeepSleep => 0,
+
+            // Direction modifiers that take an address/target
+            OpKind::To | OpKind::From => 1,
+
+            // ===== Primitives (single-segment operations) =====
+            // Nullary
+            OpKind::Nop | OpKind::Halt | OpKind::Sleep => 0,
+
+            // Unary
+            OpKind::Inc
+            | OpKind::Dec
+            | OpKind::Neg
+            | OpKind::Abs
+            | OpKind::Not
+            | OpKind::FSqrt
+            | OpKind::FAbs => 1,
+
+            // Binary
+            OpKind::Add
+            | OpKind::Sub
+            | OpKind::Mul
+            | OpKind::Div
+            | OpKind::Mod
+            | OpKind::And
+            | OpKind::Or
+            | OpKind::Xor
+            | OpKind::Shl
+            | OpKind::Shr
+            | OpKind::Sar
+            | OpKind::Rol
+            | OpKind::Ror
+            | OpKind::Cmp
+            | OpKind::Eq
+            | OpKind::Ne
+            | OpKind::Lt
+            | OpKind::Le
+            | OpKind::Gt
+            | OpKind::Ge
+            | OpKind::FAdd
+            | OpKind::FSub
+            | OpKind::FMul
+            | OpKind::FDiv
+            | OpKind::FCmp => 2,
+        }
+    }
 }
