@@ -15,6 +15,7 @@ embeem-parser = { path = "../embeem-parser" }
 [features]
 default = ["alloc"]
 alloc = ["embeem-ast/alloc"]
+resolve = ["alloc"]
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -30,6 +30,8 @@ pub mod mangle;
 mod ops;
 #[cfg(feature = "alloc")]
 mod pretty;
+#[cfg(feature = "alloc")]
+pub mod resolve;
 
 #[cfg(all(feature = "alloc", feature = "inference"))]
 mod infer;
