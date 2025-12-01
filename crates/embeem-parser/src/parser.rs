@@ -1,4 +1,7 @@
 //! Parser implementation for Embeem.
+//!
+//! This module implements a parser for the Embeem language following the
+//! grammar specification in `spec/SPECIFICATION.md`.
 
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
@@ -46,7 +49,13 @@ pub fn parse_program(input: &str) -> Result<Program, ParseError> {
     }
 }
 
-// Helper to skip whitespace and comments
+/// Skip whitespace and comments.
+///
+/// From spec Section 2.6:
+/// ```text
+/// LINE_COMMENT   ::= '//' [^\n]*
+/// BLOCK_COMMENT  ::= '/*' .* '*/'
+/// ```
 fn skip_ws(input: &str) -> &str {
     let mut rest = input;
     loop {
@@ -80,6 +89,13 @@ fn skip_ws(input: &str) -> &str {
     rest
 }
 
+/// Parse a program.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// program     = { item } ;
+/// item        = function | const_decl ;
+/// ```
 fn program(input: &str) -> IResult<&str, Program> {
     let mut constants = Vec::new();
     let mut functions = Vec::new();
@@ -109,6 +125,12 @@ fn program(input: &str) -> IResult<&str, Program> {
     Ok((current, Program { constants, functions }))
 }
 
+/// Parse a constant declaration.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// const_decl  = "const" IDENT ":" type "=" const_expr ";" ;
+/// ```
 fn const_decl(input: &str) -> IResult<&str, ConstDecl> {
     let (input, _) = tag("const").parse(input)?;
     let input = skip_ws(input);
@@ -127,6 +149,12 @@ fn const_decl(input: &str) -> IResult<&str, ConstDecl> {
     Ok((input, ConstDecl { name, ty, value }))
 }
 
+/// Parse a function definition.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// function    = "fn" IDENT "(" [ param_list ] ")" [ "->" type ] block ;
+/// ```
 fn function(input: &str) -> IResult<&str, Function> {
     let (input, _) = tag("fn").parse(input)?;
     let input = skip_ws(input);
@@ -149,6 +177,12 @@ fn function(input: &str) -> IResult<&str, Function> {
     Ok((input, Function { name, params, return_type, body }))
 }
 
+/// Parse a parameter list.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// param_list  = param { "," param } ;
+/// ```
 fn param_list(input: &str) -> IResult<&str, Vec<Param>> {
     let mut params = Vec::new();
     let mut current = input;
@@ -173,6 +207,12 @@ fn param_list(input: &str) -> IResult<&str, Vec<Param>> {
     Ok((current, params))
 }
 
+/// Parse a function parameter.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// param       = IDENT ":" type ;
+/// ```
 fn param(input: &str) -> IResult<&str, Param> {
     let (input, name) = identifier(input)?;
     let input = skip_ws(input);
@@ -183,6 +223,12 @@ fn param(input: &str) -> IResult<&str, Param> {
     Ok((input, Param { name, ty }))
 }
 
+/// Parse a type annotation.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// type        = prim_type | array_type | tuple_type ;
+/// ```
 fn type_annotation(input: &str) -> IResult<&str, Type> {
     // Try array type first
     if input.starts_with('[') {
@@ -197,6 +243,14 @@ fn type_annotation(input: &str) -> IResult<&str, Type> {
     primitive_type(input)
 }
 
+/// Parse a primitive type.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// prim_type   = "u8" | "u16" | "u32" | "u64"
+///             | "i8" | "i16" | "i32" | "i64"
+///             | "f32" | "f64" | "bool" ;
+/// ```
 fn primitive_type(input: &str) -> IResult<&str, Type> {
     alt((
         value(Type::Primitive(PrimitiveType::U64), tag("u64")),
@@ -213,6 +267,12 @@ fn primitive_type(input: &str) -> IResult<&str, Type> {
     )).parse(input)
 }
 
+/// Parse an array type.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// array_type  = "[" type ";" INTEGER "]" ;
+/// ```
 fn array_type(input: &str) -> IResult<&str, Type> {
     let (input, _) = char('[').parse(input)?;
     let input = skip_ws(input);
@@ -227,6 +287,12 @@ fn array_type(input: &str) -> IResult<&str, Type> {
     Ok((input, Type::Array(Box::new(elem_type), size)))
 }
 
+/// Parse a tuple type.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// tuple_type  = "(" type { "," type } ")" ;
+/// ```
 fn tuple_type(input: &str) -> IResult<&str, Type> {
     let (input, _) = char('(').parse(input)?;
     let input = skip_ws(input);
@@ -271,6 +337,12 @@ fn block(input: &str) -> IResult<&str, Block> {
     Ok((input, Block { statements, result }))
 }
 
+/// Parse block contents (statements and optional result expression).
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// block       = "{" { statement } [ expr ] "}" ;
+/// ```
 fn block_contents(input: &str) -> IResult<&str, (Vec<Statement>, Option<Box<Expression>>)> {
     let mut statements = Vec::new();
     let mut current = input;
@@ -346,6 +418,12 @@ fn is_value_expression(expr: &Expression) -> bool {
     }
 }
 
+/// Parse a statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// statement   = let_stmt | assign_stmt | expr_stmt | if_stmt | for_stmt | repeat_stmt | while_stmt ;
+/// ```
 fn statement(input: &str) -> IResult<&str, Statement> {
     // Try different statement types
     if input.starts_with("let") && !is_ident_char(input.as_bytes().get(3).copied().unwrap_or(0)) {
@@ -371,6 +449,12 @@ fn statement(input: &str) -> IResult<&str, Statement> {
     assign_or_expr_statement(input)
 }
 
+/// Parse a let statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// let_stmt    = "let" [ "mut" ] IDENT [ ":" type ] "=" expr ";" ;
+/// ```
 fn let_statement(input: &str) -> IResult<&str, Statement> {
     let (input, _) = tag("let").parse(input)?;
     let input = skip_ws(input);
@@ -398,6 +482,12 @@ fn let_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::Let { name, mutable, ty, value }))
 }
 
+/// Parse an if statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// if_stmt     = "if" expr block [ "else" ( block | if_stmt ) ] ;
+/// ```
 fn if_statement(input: &str) -> IResult<&str, Statement> {
     let (input, _) = tag("if").parse(input)?;
     let input = skip_ws(input);
@@ -421,6 +511,13 @@ fn if_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::If { condition, then_block, else_block }))
 }
 
+/// Parse a for loop statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// for_stmt    = "for" IDENT "in" range block ;
+/// range       = const_expr ( "to" | "downto" ) const_expr ;
+/// ```
 fn for_statement(input: &str) -> IResult<&str, Statement> {
     let (input, _) = tag("for").parse(input)?;
     let input = skip_ws(input);
@@ -445,6 +542,12 @@ fn for_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::For { variable, start, end, direction, body }))
 }
 
+/// Parse a repeat statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// repeat_stmt = "repeat" const_expr block ;
+/// ```
 fn repeat_statement(input: &str) -> IResult<&str, Statement> {
     let (input, _) = tag("repeat").parse(input)?;
     let input = skip_ws(input);
@@ -455,6 +558,12 @@ fn repeat_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::Repeat { count, body }))
 }
 
+/// Parse a bounded while statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// while_stmt  = "while" expr "max" const_expr block ;
+/// ```
 fn while_statement(input: &str) -> IResult<&str, Statement> {
     let (input, _) = tag("while").parse(input)?;
     let input = skip_ws(input);
@@ -469,6 +578,13 @@ fn while_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::While { condition, max_iterations, body }))
 }
 
+/// Parse an assignment or expression statement.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// assign_stmt = IDENT "=" expr ";" ;
+/// expr_stmt   = expr ";" ;
+/// ```
 fn assign_or_expr_statement(input: &str) -> IResult<&str, Statement> {
     // Try to parse an identifier followed by '='
     if let Ok((rest, name)) = identifier(input) {
@@ -492,11 +608,22 @@ fn assign_or_expr_statement(input: &str) -> IResult<&str, Statement> {
     Ok((input, Statement::Expr(expr)))
 }
 
-// Expression parsing with operator precedence
+/// Parse an expression.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// expr        = or_expr ;
+/// ```
 fn expression(input: &str) -> IResult<&str, Expression> {
     or_expr(input)
 }
 
+/// Parse a logical or expression.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// or_expr     = and_expr { "or" and_expr } ;
+/// ```
 fn or_expr(input: &str) -> IResult<&str, Expression> {
     let (mut input, mut left) = and_expr(input)?;
     
@@ -520,6 +647,12 @@ fn or_expr(input: &str) -> IResult<&str, Expression> {
     Ok((input, left))
 }
 
+/// Parse a logical and expression.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// and_expr    = comp_expr { "and" comp_expr } ;
+/// ```
 fn and_expr(input: &str) -> IResult<&str, Expression> {
     let (mut input, mut left) = comp_expr(input)?;
     
@@ -543,6 +676,13 @@ fn and_expr(input: &str) -> IResult<&str, Expression> {
     Ok((input, left))
 }
 
+/// Parse a comparison expression.
+///
+/// From spec Section 10.1 (EBNF Grammar):
+/// ```text
+/// comp_expr   = bitor_expr { comp_op bitor_expr } ;
+/// comp_op     = "==" | "!=" | "<" | "<=" | ">" | ">=" ;
+/// ```
 fn comp_expr(input: &str) -> IResult<&str, Expression> {
     let (input, left) = bitor_expr(input)?;
     let trimmed = skip_ws(input);

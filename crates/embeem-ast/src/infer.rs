@@ -272,16 +272,95 @@ fn widen_primitives(left: PrimitiveType, right: PrimitiveType) -> Option<Primiti
 
 /// Infer the type of an operation.
 ///
-/// TODO: Some operations (like arithmetic) could benefit from argument-based type inference.
-/// For example, ADD(a, b) where both are u32 should return u32, not u64.
-/// Currently, we use conservative defaults for each operation kind.
-fn infer_operation_type(kind: OpKind, _args: &[Expression], _ctx: &TypeContext) -> Option<Type> {
-    // Most operations return u64 by default
-    // Specific operations may have different return types
+/// For operations that mirror binary/unary operations (Add, Sub, etc.), we use
+/// argument-based type inference to determine the result type. Other operations
+/// have fixed return types based on their semantics.
+fn infer_operation_type(kind: OpKind, args: &[Expression], ctx: &TypeContext) -> Option<Type> {
     match kind {
-        // Comparison operations
-        OpKind::Eq | OpKind::Ne | OpKind::Lt | OpKind::Le | OpKind::Gt | OpKind::Ge => {
+        // Binary arithmetic operations - infer from arguments
+        OpKind::Add | OpKind::Sub | OpKind::Mul | OpKind::Div | OpKind::Mod => {
+            if args.len() == 2 {
+                let left_ty = infer_expression_type(&args[0], ctx)?;
+                let right_ty = infer_expression_type(&args[1], ctx)?;
+                return unify_types(&left_ty, &right_ty);
+            }
+            Some(Type::Primitive(PrimitiveType::U64))
+        }
+
+        // Unary arithmetic operations - infer from argument
+        OpKind::Inc | OpKind::Dec | OpKind::Neg | OpKind::Abs => {
+            if args.len() == 1 {
+                return infer_expression_type(&args[0], ctx);
+            }
+            Some(Type::Primitive(PrimitiveType::U64))
+        }
+
+        // Binary bitwise operations - infer from arguments (unify both types)
+        OpKind::And | OpKind::Or | OpKind::Xor => {
+            if args.len() == 2 {
+                let left_ty = infer_expression_type(&args[0], ctx)?;
+                let right_ty = infer_expression_type(&args[1], ctx)?;
+                return unify_types(&left_ty, &right_ty);
+            }
+            Some(Type::Primitive(PrimitiveType::U64))
+        }
+
+        // Shift and rotate operations - result type matches left operand
+        OpKind::Shl | OpKind::Shr | OpKind::Sar | OpKind::Rol | OpKind::Ror => {
+            if args.len() == 2 {
+                return infer_expression_type(&args[0], ctx);
+            }
+            Some(Type::Primitive(PrimitiveType::U64))
+        }
+
+        // Unary bitwise operation - infer from argument
+        OpKind::Not => {
+            if args.len() == 1 {
+                return infer_expression_type(&args[0], ctx);
+            }
+            Some(Type::Primitive(PrimitiveType::U64))
+        }
+
+        // Comparison operations always return bool
+        OpKind::Eq | OpKind::Ne | OpKind::Lt | OpKind::Le | OpKind::Gt | OpKind::Ge | OpKind::Cmp => {
             Some(Type::Primitive(PrimitiveType::Bool))
+        }
+
+        // Floating point binary operations - infer from arguments
+        OpKind::FAdd | OpKind::FSub | OpKind::FMul | OpKind::FDiv => {
+            if args.len() == 2 {
+                let left_ty = infer_expression_type(&args[0], ctx)?;
+                let right_ty = infer_expression_type(&args[1], ctx)?;
+                return unify_types(&left_ty, &right_ty);
+            }
+            Some(Type::Primitive(PrimitiveType::F64))
+        }
+
+        // Floating point unary operations - infer from argument
+        OpKind::FSqrt | OpKind::FAbs => {
+            if args.len() == 1 {
+                return infer_expression_type(&args[0], ctx);
+            }
+            Some(Type::Primitive(PrimitiveType::F64))
+        }
+
+        // Floating point comparison
+        OpKind::FCmp => Some(Type::Primitive(PrimitiveType::I32)),
+
+        // Bit manipulation - preserve input type for set/clear/toggle
+        OpKind::SetBit | OpKind::ClearBit | OpKind::ToggleBit => {
+            if !args.is_empty() {
+                return infer_expression_type(&args[0], ctx);
+            }
+            Some(Type::Primitive(PrimitiveType::U64))
+        }
+
+        // Test operations return bool
+        OpKind::Test | OpKind::TestBit => Some(Type::Primitive(PrimitiveType::Bool)),
+
+        // Bit counting operations return u8
+        OpKind::CountOnes | OpKind::CountZeros | OpKind::FindFirstSet | OpKind::FindFirstZero => {
+            Some(Type::Primitive(PrimitiveType::U8))
         }
 
         // GPIO read returns u8 (0 or 1)
@@ -302,21 +381,10 @@ fn infer_operation_type(kind: OpKind, _args: &[Expression], _ctx: &TypeContext) 
         // I2C read
         OpKind::I2cRead | OpKind::I2cReadFrom => Some(Type::Primitive(PrimitiveType::U8)),
 
-        // Bit manipulation that returns count
-        OpKind::CountOnes | OpKind::CountZeros | OpKind::FindFirstSet | OpKind::FindFirstZero => {
-            Some(Type::Primitive(PrimitiveType::U8))
-        }
-
-        // Test operations return bool
-        OpKind::Test | OpKind::TestBit => Some(Type::Primitive(PrimitiveType::Bool)),
-
-        // Floating point comparison
-        OpKind::FCmp => Some(Type::Primitive(PrimitiveType::I32)),
-
         // RTC get time
         OpKind::RtcGetTime => Some(Type::Primitive(PrimitiveType::U64)),
 
-        // Default to u64 for most arithmetic and other operations
+        // Default to u64 for most other operations
         _ => Some(Type::Primitive(PrimitiveType::U64)),
     }
 }

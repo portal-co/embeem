@@ -25,13 +25,30 @@ impl CodegenError {
 }
 
 /// Options for C code generation.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct CodegenOptions {
     /// Use GCC statement expressions `({ ... })` for block expressions and complex if expressions.
     /// This is a GCC extension that allows embedding statements inside expressions.
     /// When enabled, complex control flow can be inlined as expressions.
     /// When disabled, such constructs may produce errors or require restructuring.
     pub use_gcc_statement_exprs: bool,
+    /// Prefix for mangled function names to avoid symbol collisions.
+    /// Default is "embeem_".
+    pub mangle_prefix: String,
+    /// Prefix for operation function names.
+    /// Users can customize this to provide their own operation implementations.
+    /// Default is "embeem_op_".
+    pub op_prefix: String,
+}
+
+impl Default for CodegenOptions {
+    fn default() -> Self {
+        Self {
+            use_gcc_statement_exprs: false,
+            mangle_prefix: "embeem_".to_string(),
+            op_prefix: "embeem_op_".to_string(),
+        }
+    }
 }
 
 impl CodegenOptions {
@@ -43,6 +60,18 @@ impl CodegenOptions {
     /// Enable GCC statement expressions.
     pub fn with_gcc_extensions(mut self) -> Self {
         self.use_gcc_statement_exprs = true;
+        self
+    }
+
+    /// Set the function name mangling prefix.
+    pub fn with_mangle_prefix(mut self, prefix: &str) -> Self {
+        self.mangle_prefix = prefix.to_string();
+        self
+    }
+
+    /// Set the operation function prefix for customizing operation implementations.
+    pub fn with_op_prefix(mut self, prefix: &str) -> Self {
+        self.op_prefix = prefix.to_string();
         self
     }
 }
@@ -115,9 +144,77 @@ impl CCodegen {
         self.emit_line("#include <stdint.h>");
         self.emit_line("#include <stdbool.h>");
         self.emit_line("");
-        self.emit_line("/* Platform-specific operation declarations */");
-        self.emit_line("/* These should be provided by the target platform */");
+        
+        // Generate static inline functions for operations with direct C equivalents
+        self.emit_line("/* Inline implementations for operations with direct C equivalents */");
         self.emit_line("");
+        
+        // Arithmetic operations
+        self.emit_inline_binop("add", "+");
+        self.emit_inline_binop("sub", "-");
+        self.emit_inline_binop("mul", "*");
+        self.emit_line(&format!("static inline uint64_t {}div(uint64_t a, uint64_t b) {{ return b != 0 ? a / b : 0; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}mod(uint64_t a, uint64_t b) {{ return b != 0 ? a % b : 0; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}inc(uint64_t x) {{ return x + 1; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}dec(uint64_t x) {{ return x - 1; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline int64_t {}neg(int64_t x) {{ return -x; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline int64_t {}abs(int64_t x) {{ return x < 0 ? -x : x; }}", self.options.op_prefix));
+        self.emit_line("");
+        
+        // Bitwise operations
+        self.emit_inline_binop("and", "&");
+        self.emit_inline_binop("or", "|");
+        self.emit_inline_binop("xor", "^");
+        self.emit_line(&format!("static inline uint64_t {}not(uint64_t x) {{ return ~x; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}shl(uint64_t x, uint64_t n) {{ return x << n; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}shr(uint64_t x, uint64_t n) {{ return x >> n; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline int64_t {}sar(int64_t x, uint64_t n) {{ return x >> n; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}rol(uint64_t x, uint64_t n) {{ n &= 63; return (x << n) | (x >> (64 - n)); }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}ror(uint64_t x, uint64_t n) {{ n &= 63; return (x >> n) | (x << (64 - n)); }}", self.options.op_prefix));
+        self.emit_line("");
+        
+        // Comparison operations
+        self.emit_line(&format!("static inline bool {}eq(uint64_t a, uint64_t b) {{ return a == b; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}ne(uint64_t a, uint64_t b) {{ return a != b; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}lt(uint64_t a, uint64_t b) {{ return a < b; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}le(uint64_t a, uint64_t b) {{ return a <= b; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}gt(uint64_t a, uint64_t b) {{ return a > b; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}ge(uint64_t a, uint64_t b) {{ return a >= b; }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline int32_t {}cmp(uint64_t a, uint64_t b) {{ return a < b ? -1 : (a > b ? 1 : 0); }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}test(uint64_t a, uint64_t b) {{ return (a & b) != 0; }}", self.options.op_prefix));
+        self.emit_line("");
+        
+        // Bit manipulation
+        self.emit_line(&format!("static inline uint64_t {}set_bit(uint64_t x, uint64_t n) {{ return x | (1ULL << n); }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}clear_bit(uint64_t x, uint64_t n) {{ return x & ~(1ULL << n); }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline uint64_t {}toggle_bit(uint64_t x, uint64_t n) {{ return x ^ (1ULL << n); }}", self.options.op_prefix));
+        self.emit_line(&format!("static inline bool {}test_bit(uint64_t x, uint64_t n) {{ return (x & (1ULL << n)) != 0; }}", self.options.op_prefix));
+        self.emit_line("");
+        
+        // Control flow
+        self.emit_line(&format!("static inline void {}nop(void) {{ }}", self.options.op_prefix));
+        self.emit_line("");
+
+        self.emit_line("/* Platform-specific operation declarations */");
+        self.emit_line("/* These functions should be provided by the target platform. */");
+        self.emit_line(&format!("/* All platform operations use the '{}' prefix. */", self.options.op_prefix));
+        self.emit_line("/* Example declarations: */");
+        self.emit_line(&format!("/*   uint8_t {}gpio_read(uint64_t pin); */", self.options.op_prefix));
+        self.emit_line(&format!("/*   void {}gpio_write(uint64_t pin, uint64_t value); */", self.options.op_prefix));
+        self.emit_line(&format!("/*   void {}delay_ms(uint64_t ms); */", self.options.op_prefix));
+        self.emit_line("");
+    }
+
+    fn emit_inline_binop(&mut self, name: &str, op: &str) {
+        self.emit_line(&format!(
+            "static inline uint64_t {}{}(uint64_t a, uint64_t b) {{ return a {} b; }}",
+            self.options.op_prefix, name, op
+        ));
+    }
+
+    /// Mangle a function name to avoid symbol collisions.
+    fn mangle_name(&self, name: &str) -> String {
+        format!("{}{}", self.options.mangle_prefix, name)
     }
 
     fn emit_const(&mut self, constant: &ConstDecl) -> Result<(), CodegenError> {
@@ -146,7 +243,8 @@ impl CCodegen {
             params
         };
 
-        self.emit_line(&format!("{} {}({});", return_type, function.name, params));
+        let mangled_name = self.mangle_name(&function.name);
+        self.emit_line(&format!("{} {}({});", return_type, mangled_name, params));
         Ok(())
     }
 
@@ -175,7 +273,8 @@ impl CCodegen {
             params
         };
 
-        self.emit_line(&format!("{} {}({}) {{", return_type, function.name, params));
+        let mangled_name = self.mangle_name(&function.name);
+        self.emit_line(&format!("{} {}({}) {{", return_type, mangled_name, params));
         self.indent += 1;
 
         self.emit_block(&function.body, function.return_type.is_some())?;
@@ -418,7 +517,8 @@ impl CCodegen {
                 let arg_strs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.expr_to_c(a)).collect();
                 let arg_strs = arg_strs?;
-                Ok(format!("{}({})", function, arg_strs.join(", ")))
+                let mangled_name = self.mangle_name(function);
+                Ok(format!("{}({})", mangled_name, arg_strs.join(", ")))
             }
 
             Expression::Block(blk) => {
@@ -531,142 +631,145 @@ impl CCodegen {
         }
     }
 
-    fn op_kind_to_c_name(&self, kind: OpKind) -> &'static str {
+    fn op_kind_to_c_name(&self, kind: OpKind) -> String {
+        let prefix = &self.options.op_prefix;
         match kind {
-            OpKind::Add => "embeem_add",
-            OpKind::Sub => "embeem_sub",
-            OpKind::Mul => "embeem_mul",
-            OpKind::Div => "embeem_div",
-            OpKind::Mod => "embeem_mod",
-            OpKind::Inc => "embeem_inc",
-            OpKind::Dec => "embeem_dec",
-            OpKind::Neg => "embeem_neg",
-            OpKind::Abs => "embeem_abs",
-            OpKind::And => "embeem_and",
-            OpKind::Or => "embeem_or",
-            OpKind::Xor => "embeem_xor",
-            OpKind::Not => "embeem_not",
-            OpKind::Shl => "embeem_shl",
-            OpKind::Shr => "embeem_shr",
-            OpKind::Sar => "embeem_sar",
-            OpKind::Rol => "embeem_rol",
-            OpKind::Ror => "embeem_ror",
-            OpKind::Cmp => "embeem_cmp",
-            OpKind::Test => "embeem_test",
-            OpKind::Eq => "embeem_eq",
-            OpKind::Ne => "embeem_ne",
-            OpKind::Lt => "embeem_lt",
-            OpKind::Le => "embeem_le",
-            OpKind::Gt => "embeem_gt",
-            OpKind::Ge => "embeem_ge",
-            OpKind::Nop => "embeem_nop",
-            OpKind::Halt => "embeem_halt",
-            OpKind::Sleep => "embeem_sleep",
-            OpKind::SetBit => "embeem_set_bit",
-            OpKind::ClearBit => "embeem_clear_bit",
-            OpKind::ToggleBit => "embeem_toggle_bit",
-            OpKind::TestBit => "embeem_test_bit",
-            OpKind::CountOnes => "embeem_count_ones",
-            OpKind::CountZeros => "embeem_count_zeros",
-            OpKind::FindFirstSet => "embeem_find_first_set",
-            OpKind::FindFirstZero => "embeem_find_first_zero",
-            OpKind::FAdd => "embeem_fadd",
-            OpKind::FSub => "embeem_fsub",
-            OpKind::FMul => "embeem_fmul",
-            OpKind::FDiv => "embeem_fdiv",
-            OpKind::FSqrt => "embeem_fsqrt",
-            OpKind::FAbs => "embeem_fabs",
-            OpKind::FCmp => "embeem_fcmp",
-            OpKind::GpioRead => "GPIO_READ",
-            OpKind::GpioWrite => "GPIO_WRITE",
-            OpKind::GpioToggle => "GPIO_TOGGLE",
-            OpKind::GpioSetMode => "GPIO_SET_MODE",
-            OpKind::GpioReadPort => "GPIO_READ_PORT",
-            OpKind::GpioWritePort => "GPIO_WRITE_PORT",
-            OpKind::AdcRead => "ADC_READ",
-            OpKind::AdcStartConversion => "ADC_START_CONVERSION",
-            OpKind::AdcReadMulti => "ADC_READ_MULTI",
-            OpKind::DacWrite => "DAC_WRITE",
-            OpKind::AdcSetResolution => "ADC_SET_RESOLUTION",
-            OpKind::AdcSetReference => "ADC_SET_REFERENCE",
-            OpKind::PwmStart => "PWM_START",
-            OpKind::PwmStop => "PWM_STOP",
-            OpKind::PwmSetDutyCycle => "PWM_SET_DUTY_CYCLE",
-            OpKind::PwmSetFrequency => "PWM_SET_FREQUENCY",
-            OpKind::PwmSetPulseWidth => "PWM_SET_PULSE_WIDTH",
-            OpKind::TimerStart => "TIMER_START",
-            OpKind::TimerStop => "TIMER_STOP",
-            OpKind::TimerReset => "TIMER_RESET",
-            OpKind::TimerRead => "TIMER_READ",
-            OpKind::TimerSetPeriod => "TIMER_SET_PERIOD",
-            OpKind::TimerSetCompare => "TIMER_SET_COMPARE",
-            OpKind::GetMillis => "GET_MILLIS",
-            OpKind::GetMicros => "GET_MICROS",
-            OpKind::DelayMs => "DELAY_MS",
-            OpKind::DelayUs => "DELAY_US",
-            OpKind::UartInit => "UART_INIT",
-            OpKind::UartWriteByte => "UART_WRITE_BYTE",
-            OpKind::UartWriteBuffer => "UART_WRITE_BUFFER",
-            OpKind::UartReadByte => "UART_READ_BYTE",
-            OpKind::UartReadBuffer => "UART_READ_BUFFER",
-            OpKind::UartAvailable => "UART_AVAILABLE",
-            OpKind::UartFlush => "UART_FLUSH",
-            OpKind::UartSetBaudRate => "UART_SET_BAUD_RATE",
-            OpKind::SpiInit => "SPI_INIT",
-            OpKind::SpiTransfer => "SPI_TRANSFER",
-            OpKind::SpiTransferBuffer => "SPI_TRANSFER_BUFFER",
-            OpKind::SpiSetMode => "SPI_SET_MODE",
-            OpKind::SpiSetClock => "SPI_SET_CLOCK",
-            OpKind::SpiSetBitOrder => "SPI_SET_BIT_ORDER",
-            OpKind::SpiBeginTransaction => "SPI_BEGIN_TRANSACTION",
-            OpKind::SpiEndTransaction => "SPI_END_TRANSACTION",
-            OpKind::I2cInit => "I2C_INIT",
-            OpKind::I2cStart => "I2C_START",
-            OpKind::I2cStop => "I2C_STOP",
-            OpKind::I2cWrite => "I2C_WRITE",
-            OpKind::I2cRead => "I2C_READ",
-            OpKind::I2cWriteTo => "I2C_WRITE_TO",
-            OpKind::I2cReadFrom => "I2C_READ_FROM",
-            OpKind::I2cSetClock => "I2C_SET_CLOCK",
-            OpKind::I2cScan => "I2C_SCAN",
-            OpKind::CanInit => "CAN_INIT",
-            OpKind::CanSend => "CAN_SEND",
-            OpKind::CanReceive => "CAN_RECEIVE",
-            OpKind::CanSetFilter => "CAN_SET_FILTER",
-            OpKind::CanSetBitrate => "CAN_SET_BITRATE",
-            OpKind::UsbInit => "USB_INIT",
-            OpKind::UsbConnect => "USB_CONNECT",
-            OpKind::UsbDisconnect => "USB_DISCONNECT",
-            OpKind::UsbWrite => "USB_WRITE",
-            OpKind::UsbRead => "USB_READ",
-            OpKind::UsbAvailable => "USB_AVAILABLE",
-            OpKind::WdtEnable => "WDT_ENABLE",
-            OpKind::WdtDisable => "WDT_DISABLE",
-            OpKind::WdtReset => "WDT_RESET",
-            OpKind::WdtSetTimeout => "WDT_SET_TIMEOUT",
-            OpKind::DmaInit => "DMA_INIT",
-            OpKind::DmaStart => "DMA_START",
-            OpKind::DmaStop => "DMA_STOP",
-            OpKind::DmaConfig => "DMA_CONFIG",
-            OpKind::DmaSetSource => "DMA_SET_SOURCE",
-            OpKind::DmaSetDestination => "DMA_SET_DESTINATION",
-            OpKind::EepromRead => "EEPROM_READ",
-            OpKind::EepromWrite => "EEPROM_WRITE",
-            OpKind::EepromUpdate => "EEPROM_UPDATE",
-            OpKind::FlashRead => "FLASH_READ",
-            OpKind::FlashWrite => "FLASH_WRITE",
-            OpKind::FlashErase => "FLASH_ERASE",
-            OpKind::SetPowerMode => "SET_POWER_MODE",
-            OpKind::DisablePeripheral => "DISABLE_PERIPHERAL",
-            OpKind::EnablePeripheral => "ENABLE_PERIPHERAL",
-            OpKind::SetClockSpeed => "SET_CLOCK_SPEED",
-            OpKind::EnterStandby => "ENTER_STANDBY",
-            OpKind::EnterDeepSleep => "ENTER_DEEP_SLEEP",
-            OpKind::RtcInit => "RTC_INIT",
-            OpKind::RtcSetTime => "RTC_SET_TIME",
-            OpKind::RtcGetTime => "RTC_GET_TIME",
-            OpKind::RtcSetAlarm => "RTC_SET_ALARM",
-            OpKind::RtcSetCalendar => "RTC_SET_CALENDAR",
+            // Operations with inline implementations (use op_prefix)
+            OpKind::Add => format!("{}add", prefix),
+            OpKind::Sub => format!("{}sub", prefix),
+            OpKind::Mul => format!("{}mul", prefix),
+            OpKind::Div => format!("{}div", prefix),
+            OpKind::Mod => format!("{}mod", prefix),
+            OpKind::Inc => format!("{}inc", prefix),
+            OpKind::Dec => format!("{}dec", prefix),
+            OpKind::Neg => format!("{}neg", prefix),
+            OpKind::Abs => format!("{}abs", prefix),
+            OpKind::And => format!("{}and", prefix),
+            OpKind::Or => format!("{}or", prefix),
+            OpKind::Xor => format!("{}xor", prefix),
+            OpKind::Not => format!("{}not", prefix),
+            OpKind::Shl => format!("{}shl", prefix),
+            OpKind::Shr => format!("{}shr", prefix),
+            OpKind::Sar => format!("{}sar", prefix),
+            OpKind::Rol => format!("{}rol", prefix),
+            OpKind::Ror => format!("{}ror", prefix),
+            OpKind::Cmp => format!("{}cmp", prefix),
+            OpKind::Test => format!("{}test", prefix),
+            OpKind::Eq => format!("{}eq", prefix),
+            OpKind::Ne => format!("{}ne", prefix),
+            OpKind::Lt => format!("{}lt", prefix),
+            OpKind::Le => format!("{}le", prefix),
+            OpKind::Gt => format!("{}gt", prefix),
+            OpKind::Ge => format!("{}ge", prefix),
+            OpKind::Nop => format!("{}nop", prefix),
+            OpKind::SetBit => format!("{}set_bit", prefix),
+            OpKind::ClearBit => format!("{}clear_bit", prefix),
+            OpKind::ToggleBit => format!("{}toggle_bit", prefix),
+            OpKind::TestBit => format!("{}test_bit", prefix),
+            OpKind::CountOnes => format!("{}count_ones", prefix),
+            OpKind::CountZeros => format!("{}count_zeros", prefix),
+            OpKind::FindFirstSet => format!("{}find_first_set", prefix),
+            OpKind::FindFirstZero => format!("{}find_first_zero", prefix),
+            OpKind::FAdd => format!("{}fadd", prefix),
+            OpKind::FSub => format!("{}fsub", prefix),
+            OpKind::FMul => format!("{}fmul", prefix),
+            OpKind::FDiv => format!("{}fdiv", prefix),
+            OpKind::FSqrt => format!("{}fsqrt", prefix),
+            OpKind::FAbs => format!("{}fabs", prefix),
+            OpKind::FCmp => format!("{}fcmp", prefix),
+            OpKind::Halt => format!("{}halt", prefix),
+            OpKind::Sleep => format!("{}sleep", prefix),
+            // Platform-specific operations (use op_prefix but not defined inline)
+            OpKind::GpioRead => format!("{}gpio_read", prefix),
+            OpKind::GpioWrite => format!("{}gpio_write", prefix),
+            OpKind::GpioToggle => format!("{}gpio_toggle", prefix),
+            OpKind::GpioSetMode => format!("{}gpio_set_mode", prefix),
+            OpKind::GpioReadPort => format!("{}gpio_read_port", prefix),
+            OpKind::GpioWritePort => format!("{}gpio_write_port", prefix),
+            OpKind::AdcRead => format!("{}adc_read", prefix),
+            OpKind::AdcStartConversion => format!("{}adc_start_conversion", prefix),
+            OpKind::AdcReadMulti => format!("{}adc_read_multi", prefix),
+            OpKind::DacWrite => format!("{}dac_write", prefix),
+            OpKind::AdcSetResolution => format!("{}adc_set_resolution", prefix),
+            OpKind::AdcSetReference => format!("{}adc_set_reference", prefix),
+            OpKind::PwmStart => format!("{}pwm_start", prefix),
+            OpKind::PwmStop => format!("{}pwm_stop", prefix),
+            OpKind::PwmSetDutyCycle => format!("{}pwm_set_duty_cycle", prefix),
+            OpKind::PwmSetFrequency => format!("{}pwm_set_frequency", prefix),
+            OpKind::PwmSetPulseWidth => format!("{}pwm_set_pulse_width", prefix),
+            OpKind::TimerStart => format!("{}timer_start", prefix),
+            OpKind::TimerStop => format!("{}timer_stop", prefix),
+            OpKind::TimerReset => format!("{}timer_reset", prefix),
+            OpKind::TimerRead => format!("{}timer_read", prefix),
+            OpKind::TimerSetPeriod => format!("{}timer_set_period", prefix),
+            OpKind::TimerSetCompare => format!("{}timer_set_compare", prefix),
+            OpKind::GetMillis => format!("{}get_millis", prefix),
+            OpKind::GetMicros => format!("{}get_micros", prefix),
+            OpKind::DelayMs => format!("{}delay_ms", prefix),
+            OpKind::DelayUs => format!("{}delay_us", prefix),
+            OpKind::UartInit => format!("{}uart_init", prefix),
+            OpKind::UartWriteByte => format!("{}uart_write_byte", prefix),
+            OpKind::UartWriteBuffer => format!("{}uart_write_buffer", prefix),
+            OpKind::UartReadByte => format!("{}uart_read_byte", prefix),
+            OpKind::UartReadBuffer => format!("{}uart_read_buffer", prefix),
+            OpKind::UartAvailable => format!("{}uart_available", prefix),
+            OpKind::UartFlush => format!("{}uart_flush", prefix),
+            OpKind::UartSetBaudRate => format!("{}uart_set_baud_rate", prefix),
+            OpKind::SpiInit => format!("{}spi_init", prefix),
+            OpKind::SpiTransfer => format!("{}spi_transfer", prefix),
+            OpKind::SpiTransferBuffer => format!("{}spi_transfer_buffer", prefix),
+            OpKind::SpiSetMode => format!("{}spi_set_mode", prefix),
+            OpKind::SpiSetClock => format!("{}spi_set_clock", prefix),
+            OpKind::SpiSetBitOrder => format!("{}spi_set_bit_order", prefix),
+            OpKind::SpiBeginTransaction => format!("{}spi_begin_transaction", prefix),
+            OpKind::SpiEndTransaction => format!("{}spi_end_transaction", prefix),
+            OpKind::I2cInit => format!("{}i2c_init", prefix),
+            OpKind::I2cStart => format!("{}i2c_start", prefix),
+            OpKind::I2cStop => format!("{}i2c_stop", prefix),
+            OpKind::I2cWrite => format!("{}i2c_write", prefix),
+            OpKind::I2cRead => format!("{}i2c_read", prefix),
+            OpKind::I2cWriteTo => format!("{}i2c_write_to", prefix),
+            OpKind::I2cReadFrom => format!("{}i2c_read_from", prefix),
+            OpKind::I2cSetClock => format!("{}i2c_set_clock", prefix),
+            OpKind::I2cScan => format!("{}i2c_scan", prefix),
+            OpKind::CanInit => format!("{}can_init", prefix),
+            OpKind::CanSend => format!("{}can_send", prefix),
+            OpKind::CanReceive => format!("{}can_receive", prefix),
+            OpKind::CanSetFilter => format!("{}can_set_filter", prefix),
+            OpKind::CanSetBitrate => format!("{}can_set_bitrate", prefix),
+            OpKind::UsbInit => format!("{}usb_init", prefix),
+            OpKind::UsbConnect => format!("{}usb_connect", prefix),
+            OpKind::UsbDisconnect => format!("{}usb_disconnect", prefix),
+            OpKind::UsbWrite => format!("{}usb_write", prefix),
+            OpKind::UsbRead => format!("{}usb_read", prefix),
+            OpKind::UsbAvailable => format!("{}usb_available", prefix),
+            OpKind::WdtEnable => format!("{}wdt_enable", prefix),
+            OpKind::WdtDisable => format!("{}wdt_disable", prefix),
+            OpKind::WdtReset => format!("{}wdt_reset", prefix),
+            OpKind::WdtSetTimeout => format!("{}wdt_set_timeout", prefix),
+            OpKind::DmaInit => format!("{}dma_init", prefix),
+            OpKind::DmaStart => format!("{}dma_start", prefix),
+            OpKind::DmaStop => format!("{}dma_stop", prefix),
+            OpKind::DmaConfig => format!("{}dma_config", prefix),
+            OpKind::DmaSetSource => format!("{}dma_set_source", prefix),
+            OpKind::DmaSetDestination => format!("{}dma_set_destination", prefix),
+            OpKind::EepromRead => format!("{}eeprom_read", prefix),
+            OpKind::EepromWrite => format!("{}eeprom_write", prefix),
+            OpKind::EepromUpdate => format!("{}eeprom_update", prefix),
+            OpKind::FlashRead => format!("{}flash_read", prefix),
+            OpKind::FlashWrite => format!("{}flash_write", prefix),
+            OpKind::FlashErase => format!("{}flash_erase", prefix),
+            OpKind::SetPowerMode => format!("{}set_power_mode", prefix),
+            OpKind::DisablePeripheral => format!("{}disable_peripheral", prefix),
+            OpKind::EnablePeripheral => format!("{}enable_peripheral", prefix),
+            OpKind::SetClockSpeed => format!("{}set_clock_speed", prefix),
+            OpKind::EnterStandby => format!("{}enter_standby", prefix),
+            OpKind::EnterDeepSleep => format!("{}enter_deep_sleep", prefix),
+            OpKind::RtcInit => format!("{}rtc_init", prefix),
+            OpKind::RtcSetTime => format!("{}rtc_set_time", prefix),
+            OpKind::RtcGetTime => format!("{}rtc_get_time", prefix),
+            OpKind::RtcSetAlarm => format!("{}rtc_set_alarm", prefix),
+            OpKind::RtcSetCalendar => format!("{}rtc_set_calendar", prefix),
         }
     }
 
@@ -992,8 +1095,10 @@ mod tests {
         "#;
         let program = parse_program(src).unwrap();
         let c_code = compile_to_c(&program).unwrap();
-        assert!(c_code.contains("void main(void)"));
-        assert!(c_code.contains("GPIO_SET_MODE"));
+        // Function names are mangled with prefix
+        assert!(c_code.contains("void embeem_main(void)"));
+        // GPIO operations use the op_prefix
+        assert!(c_code.contains("embeem_op_gpio_set_mode"));
     }
 
     #[test]
