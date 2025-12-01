@@ -692,8 +692,18 @@ impl<'a, FS: FileSystem> Resolver<'a, FS> {
 
             Statement::Assign { target, value } => {
                 let value = self.transform_expression(value, current_module, modules, is_root)?;
+                let target = match target {
+                    crate::AssignTarget::Identifier(name) => crate::AssignTarget::Identifier(name.clone()),
+                    crate::AssignTarget::Index { array, index } => {
+                        let index = self.transform_expression(index, current_module, modules, is_root)?;
+                        crate::AssignTarget::Index {
+                            array: array.clone(),
+                            index: Box::new(index),
+                        }
+                    }
+                };
                 Ok(Statement::Assign {
-                    target: target.clone(),
+                    target,
                     value,
                 })
             }

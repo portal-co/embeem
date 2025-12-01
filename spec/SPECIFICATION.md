@@ -51,19 +51,22 @@ Reserved keywords cannot be used as identifiers.
 
 #### 2.1.1 Identifier Naming Conventions
 
-**UPPER_SNAKE_CASE is reserved exclusively for operations.**
+**UPPER_SNAKE_CASE is reserved for operations and constants.**
 
-Identifiers matching the pattern `[A-Z][A-Z0-9_]*` (starting with uppercase letter, containing only uppercase letters, digits, and underscores) are reserved for the operation namespace and **cannot** be used as:
+Identifiers matching the pattern `[A-Z][A-Z0-9_]*` (starting with uppercase letter, containing only uppercase letters, digits, and underscores) are reserved for the operation namespace and for constants. They **cannot** be used as:
 - Variable names
-- Function names  
-- Constant names
+- Function names
 - Type names
 - Parameter names
+
+However, UPPER_SNAKE_CASE **is allowed** for:
+- Constant names (declared with `const`)
 
 This ensures:
 1. Future operations can be added without breaking existing programs
 2. Operations are visually distinct from user-defined identifiers
-3. The parser can unambiguously distinguish operations from function calls
+3. Constants are visually distinct and follow common convention
+4. The parser can unambiguously distinguish operations from function calls
 
 **Valid user identifiers:**
 ```embeem
@@ -73,14 +76,14 @@ let my_variable = 3;    // snake_case
 let MyType = 4;         // PascalCase
 let _private = 5;       // leading underscore
 let x1 = 6;             // with digits
+const MAX_VALUE: u32 = 100;  // UPPER_SNAKE_CASE for constants is OK
 ```
 
 **Invalid user identifiers (reserved for operations):**
 ```embeem
-let GPIO = 1;           // ERROR: UPPER_SNAKE_CASE
-let MY_CONST = 2;       // ERROR: UPPER_SNAKE_CASE  
-let ADC_CHANNEL = 3;    // ERROR: UPPER_SNAKE_CASE
-let X = 4;              // ERROR: single uppercase letter
+let GPIO = 1;           // ERROR: UPPER_SNAKE_CASE in variable
+fn MY_FUNC() { }        // ERROR: UPPER_SNAKE_CASE in function name
+fn foo(ADC_CHANNEL: u8) { }  // ERROR: UPPER_SNAKE_CASE in parameter
 ```
 
 ### 2.2 Keywords
@@ -219,10 +222,22 @@ LET_STMT ::= 'let' IDENTIFIER (':' TYPE)? '=' EXPR ';'
 ### 5.2 Assignment Statement
 
 ```
-ASSIGN_STMT ::= IDENTIFIER '=' EXPR ';'
+ASSIGN_STMT ::= ASSIGN_TARGET '=' EXPR ';'
+
+ASSIGN_TARGET ::= IDENTIFIER
+                | IDENTIFIER '[' EXPR ']'  // Array index assignment
 ```
 
 **Note**: Only mutable variables (declared with `let mut`) can be assigned.
+
+**Array Index Assignment**: When assigning to an array element, the array must be mutable, and the index must be within bounds (0 to array_length - 1). Bounds checking is performed at runtime for expressions that cannot be evaluated at compile time.
+
+**Example**:
+```embeem
+let mut arr: [u8; 4] = [1, 2, 3, 4];
+arr[0] = 10;        // Valid: assigns to first element
+arr[i] = value;     // Valid if i is in range [0, 3]
+```
 
 ### 5.3 Expression Statement
 

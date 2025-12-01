@@ -5,6 +5,9 @@ version = 4
 [[package]]
 name = "embeem-ast"
 version = "0.1.0"
+dependencies = [
+ "embeem-parser",
+]
 
 [[package]]
 name = "embeem-codegen"

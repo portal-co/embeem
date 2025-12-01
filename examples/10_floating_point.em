@@ -48,7 +48,7 @@ fn main() {
     SET_RESOLUTION(ADC(0), 12);  // 12-bit for better precision
     
     // Buffer for samples
-    let mut samples: [f32; 16] = [0.0; 16];
+    let mut samples: [f32; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
     let mut filtered: f32 = 0.0;
     let mut sample_index: u8 = 0;
     

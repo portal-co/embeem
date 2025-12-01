@@ -566,7 +566,14 @@ impl CCodegen {
 
             Statement::Assign { target, value } => {
                 let expr = self.expr_to_c(value)?;
-                self.emit_line(&format!("{} = {};", target, expr));
+                let target_str = match target {
+                    embeem_ast::AssignTarget::Identifier(name) => name.clone(),
+                    embeem_ast::AssignTarget::Index { array, index } => {
+                        let idx = self.expr_to_c(index)?;
+                        format!("{}[{}]", array, idx)
+                    }
+                };
+                self.emit_line(&format!("{} = {};", target_str, expr));
             }
 
             Statement::Expr(expr) => {
@@ -945,7 +952,14 @@ impl CCodegen {
 
             Statement::Assign { target, value } => {
                 let expr = self.expr_to_c(value)?;
-                Ok(format!("{} = {};", target, expr))
+                let target_str = match target {
+                    embeem_ast::AssignTarget::Identifier(name) => name.clone(),
+                    embeem_ast::AssignTarget::Index { array, index } => {
+                        let idx = self.expr_to_c(index)?;
+                        format!("{}[{}]", array, idx)
+                    }
+                };
+                Ok(format!("{} = {};", target_str, expr))
             }
 
             Statement::Expr(expr) => {

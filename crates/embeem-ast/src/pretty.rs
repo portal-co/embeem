@@ -232,7 +232,13 @@ impl PrettyPrint for Statement {
                 format!("{}let {}{}{} = {};", indent, mut_kw, name, ty_ann, value.pretty_print(ctx))
             }
             Statement::Assign { target, value } => {
-                format!("{}{} = {};", indent, target, value.pretty_print(ctx))
+                let target_str = match target {
+                    crate::AssignTarget::Identifier(name) => name.clone(),
+                    crate::AssignTarget::Index { array, index } => {
+                        format!("{}[{}]", array, index.pretty_print(ctx))
+                    }
+                };
+                format!("{}{} = {};", indent, target_str, value.pretty_print(ctx))
             }
             Statement::Expr(expr) => {
                 format!("{}{};", indent, expr.pretty_print(ctx))

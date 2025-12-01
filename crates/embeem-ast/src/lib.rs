@@ -32,6 +32,8 @@ mod ops;
 mod pretty;
 #[cfg(feature = "alloc")]
 pub mod resolve;
+#[cfg(feature = "alloc")]
+pub mod validate;
 
 #[cfg(all(feature = "alloc", feature = "inference"))]
 mod infer;

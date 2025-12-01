@@ -231,6 +231,18 @@ pub struct Block {
     pub result: Option<Box<Expression>>,
 }
 
+/// Target of an assignment statement.
+#[derive(Clone, Debug, PartialEq)]
+pub enum AssignTarget {
+    /// Simple variable assignment: `x = value;`
+    Identifier(String),
+    /// Array index assignment: `arr[index] = value;`
+    Index {
+        array: String,
+        index: Box<Expression>,
+    },
+}
+
 /// A statement.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Statement {
@@ -243,7 +255,7 @@ pub enum Statement {
     },
     /// Assignment.
     Assign {
-        target: String,
+        target: AssignTarget,
         value: Expression,
     },
     /// Expression statement.

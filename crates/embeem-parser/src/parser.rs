@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use alloc::vec;
 
 use embeem_ast::{
-    BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal, Param,
+    AssignTarget, BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal, Param,
     PrimitiveType, Program, RangeDirection, Statement, Type, UnaryOp,
     is_upper_snake_case,
     // Module system types
@@ -943,21 +943,53 @@ fn while_statement(input: &str) -> IResult<&str, Statement> {
 
 /// Parse an assignment or expression statement.
 ///
-/// From spec Section 10.1 (EBNF Grammar):
+/// From spec Section 5.2 (Assignment Statement):
 /// ```text
-/// assign_stmt = IDENT "=" expr ";" ;
+/// ASSIGN_STMT ::= ASSIGN_TARGET '=' EXPR ';'
+/// ASSIGN_TARGET ::= IDENTIFIER | IDENTIFIER '[' EXPR ']'
 /// expr_stmt   = expr ";" ;
 /// ```
 fn assign_or_expr_statement(input: &str) -> IResult<&str, Statement> {
-    // Try to parse an identifier followed by '='
+    // Try to parse an identifier followed by '=' or '['
     if let Ok((rest, name)) = identifier(input) {
         let rest = skip_ws(rest);
+        
+        // Check for array index assignment: name[index] = value;
+        if rest.starts_with('[') {
+            let rest = skip_ws(&rest[1..]);
+            if let Ok((rest, index_expr)) = expression(rest) {
+                let rest = skip_ws(rest);
+                if rest.starts_with(']') {
+                    let rest = skip_ws(&rest[1..]);
+                    if rest.starts_with('=') && !rest.starts_with("==") {
+                        let rest = skip_ws(&rest[1..]);
+                        if let Ok((rest, value)) = expression(rest) {
+                            let rest = skip_ws(rest);
+                            if rest.starts_with(';') {
+                                return Ok((&rest[1..], Statement::Assign {
+                                    target: AssignTarget::Index {
+                                        array: name,
+                                        index: Box::new(index_expr),
+                                    },
+                                    value,
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Check for simple assignment: name = value;
         if rest.starts_with('=') && !rest.starts_with("==") {
             let rest = skip_ws(&rest[1..]);
             if let Ok((rest, value)) = expression(rest) {
                 let rest = skip_ws(rest);
                 if rest.starts_with(';') {
-                    return Ok((&rest[1..], Statement::Assign { target: name, value }));
+                    return Ok((&rest[1..], Statement::Assign {
+                        target: AssignTarget::Identifier(name),
+                        value,
+                    }));
                 }
             }
         }

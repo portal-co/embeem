@@ -8,6 +8,9 @@ repository.workspace = true
 
 [dependencies]
 
+[dev-dependencies]
+embeem-parser = { path = "../embeem-parser" }
+
 [features]
 default = ["alloc"]
 alloc = []
