@@ -613,6 +613,7 @@ PROGRAM ::= ITEM*
 
 ITEM    ::= FUNCTION
           | CONST_DECL
+          | EXTERN_FN
 ```
 
 ### 8.2 Functions
@@ -624,13 +625,55 @@ PARAM_LIST ::= PARAM (',' PARAM)*
 PARAM      ::= IDENTIFIER ':' TYPE
 ```
 
-### 8.3 Constants
+### 8.3 External Functions
+
+External functions are provided by the environment and declared without a body:
+
+```
+EXTERN_FN ::= 'extern' 'fn' IDENTIFIER '(' PARAM_LIST? ')' ('->' TYPE)? ';'
+```
+
+External functions allow Embeem programs to interact with the host environment, hardware abstraction layers, or runtime libraries.
+
+**Example:**
+```embeem
+extern fn get_sensor_value(channel: u8) -> i32;
+extern fn set_led(pin: u8, value: bool);
+extern fn init_hardware();
+
+fn main() {
+    init_hardware();
+    let val = get_sensor_value(0);
+    set_led(13, val > 100);
+}
+```
+
+#### 8.3.1 Totality Implications
+
+**Important**: The totality of an Embeem program that uses external functions depends on the totality of those external functions. 
+
+- If all external functions terminate (are total), the program terminates
+- If any external function may not terminate, the program may not terminate
+
+See [TOTALITY.md](../doc/TOTALITY.md) for formal proofs.
+
+#### 8.3.2 Code Generation
+
+External functions are emitted as `extern` declarations in C and are called with their declared name (no mangling):
+
+```c
+extern int32_t get_sensor_value(uint8_t channel);
+extern void set_led(uint8_t pin, bool value);
+extern void init_hardware(void);
+```
+
+### 8.4 Constants
 
 ```
 CONST_DECL ::= 'const' IDENTIFIER ':' TYPE '=' CONST_EXPR ';'
 ```
 
-### 8.4 Entry Point
+### 8.5 Entry Point
 
 Every Embeem program must have a `main` function:
 
@@ -673,10 +716,11 @@ Division or modulo by zero results in zero (defined behavior).
 ```ebnf
 (* Program structure *)
 program     = { item } ;
-item        = function | const_decl ;
+item        = function | const_decl | extern_fn ;
 
 (* Declarations *)
 function    = "fn" IDENT "(" [ param_list ] ")" [ "->" type ] block ;
+extern_fn   = "extern" "fn" IDENT "(" [ param_list ] ")" [ "->" type ] ";" ;
 param_list  = param { "," param } ;
 param       = IDENT ":" type ;
 const_decl  = "const" IDENT ":" type "=" const_expr ";" ;

@@ -20,6 +20,8 @@ pub struct TypeContext {
     functions: BTreeMap<String, Option<Type>>,
     /// Constant name to type mapping.
     constants: BTreeMap<String, Type>,
+    /// External function name to return type mapping.
+    extern_fns: BTreeMap<String, Option<Type>>,
 }
 
 impl TypeContext {
@@ -36,6 +38,12 @@ impl TypeContext {
         for constant in &program.constants {
             ctx.constants
                 .insert(constant.name.clone(), constant.ty.clone());
+        }
+
+        // Add external functions
+        for extern_fn in &program.extern_fns {
+            ctx.extern_fns
+                .insert(extern_fn.name.clone(), extern_fn.return_type.clone());
         }
 
         // Add functions
@@ -62,9 +70,17 @@ impl TypeContext {
         self.constants.get(name)
     }
 
-    /// Get the return type of a function.
+    /// Get the return type of a function (including external functions).
     pub fn get_function_return_type(&self, name: &str) -> Option<Option<&Type>> {
-        self.functions.get(name).map(|t| t.as_ref())
+        self.functions
+            .get(name)
+            .map(|t| t.as_ref())
+            .or_else(|| self.extern_fns.get(name).map(|t| t.as_ref()))
+    }
+
+    /// Check if a function name refers to an external function.
+    pub fn is_extern_fn(&self, name: &str) -> bool {
+        self.extern_fns.contains_key(name)
     }
 
     /// Clone the context for a new scope.

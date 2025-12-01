@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use alloc::vec;
 
 use embeem_ast::{
-    BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal, Param,
+    BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal, Param,
     PrimitiveType, Program, RangeDirection, Statement, Type, UnaryOp,
     is_upper_snake_case,
 };
@@ -96,10 +96,11 @@ fn skip_ws(input: &str) -> &str {
 /// From spec Section 10.1 (EBNF Grammar):
 /// ```text
 /// program     = { item } ;
-/// item        = function | const_decl ;
+/// item        = function | const_decl | extern_fn ;
 /// ```
 fn program(input: &str) -> IResult<&str, Program> {
     let mut constants = Vec::new();
+    let mut extern_fns = Vec::new();
     let mut functions = Vec::new();
     let mut current = input;
     
@@ -115,6 +116,12 @@ fn program(input: &str) -> IResult<&str, Program> {
             continue;
         }
         
+        if let Ok((rest, e)) = extern_fn(trimmed) {
+            extern_fns.push(e);
+            current = rest;
+            continue;
+        }
+        
         if let Ok((rest, f)) = function(trimmed) {
             functions.push(f);
             current = rest;
@@ -124,7 +131,7 @@ fn program(input: &str) -> IResult<&str, Program> {
         break;
     }
     
-    Ok((current, Program { constants, functions }))
+    Ok((current, Program { constants, extern_fns, functions }))
 }
 
 /// Parse a constant declaration.
@@ -149,6 +156,36 @@ fn const_decl(input: &str) -> IResult<&str, ConstDecl> {
     let (input, _) = char(';').parse(input)?;
     
     Ok((input, ConstDecl { name, ty, value }))
+}
+
+/// Parse an external function declaration.
+///
+/// Syntax:
+/// ```text
+/// extern_fn   = "extern" "fn" IDENT "(" [ param_list ] ")" [ "->" type ] ";" ;
+/// ```
+fn extern_fn(input: &str) -> IResult<&str, ExternFn> {
+    let (input, _) = tag("extern").parse(input)?;
+    let input = skip_ws(input);
+    let (input, _) = tag("fn").parse(input)?;
+    let input = skip_ws(input);
+    let (input, name) = identifier(input)?;
+    let input = skip_ws(input);
+    let (input, _) = char('(').parse(input)?;
+    let input = skip_ws(input);
+    let (input, params) = param_list(input)?;
+    let input = skip_ws(input);
+    let (input, _) = char(')').parse(input)?;
+    let input = skip_ws(input);
+    let (input, return_type) = opt(|i| {
+        let (i, _) = tag("->").parse(i)?;
+        let i = skip_ws(i);
+        type_annotation(i)
+    }).parse(input)?;
+    let input = skip_ws(input);
+    let (input, _) = char(';').parse(input)?;
+    
+    Ok((input, ExternFn { name, params, return_type }))
 }
 
 /// Parse a function definition.
@@ -1603,5 +1640,42 @@ mod tests {
         } else {
             panic!("Expected Operation expression");
         }
+    }
+
+    #[test]
+    fn test_parse_extern_fn() {
+        let src = r#"
+            extern fn get_sensor_value(channel: u8) -> i32;
+            extern fn set_led(pin: u8, value: bool);
+            extern fn init_system();
+            
+            fn main() {
+                init_system();
+                let val = get_sensor_value(0);
+                set_led(13, val > 100);
+            }
+        "#;
+        let result = parse_program(src);
+        assert!(result.is_ok());
+        let prog = result.unwrap();
+        
+        // Check external functions
+        assert_eq!(prog.extern_fns.len(), 3);
+        
+        assert_eq!(prog.extern_fns[0].name, "get_sensor_value");
+        assert_eq!(prog.extern_fns[0].params.len(), 1);
+        assert_eq!(prog.extern_fns[0].params[0].name, "channel");
+        assert!(prog.extern_fns[0].return_type.is_some());
+        
+        assert_eq!(prog.extern_fns[1].name, "set_led");
+        assert_eq!(prog.extern_fns[1].params.len(), 2);
+        assert!(prog.extern_fns[1].return_type.is_none());
+        
+        assert_eq!(prog.extern_fns[2].name, "init_system");
+        assert_eq!(prog.extern_fns[2].params.len(), 0);
+        assert!(prog.extern_fns[2].return_type.is_none());
+        
+        // Check that the main function can call external functions
+        assert_eq!(prog.functions.len(), 1);
     }
 }

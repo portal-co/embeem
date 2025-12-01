@@ -380,6 +380,44 @@
       "description": "Function and parameter names must not use UPPER_SNAKE_CASE (reserved for operations)"
     },
     
+    "externFn": {
+      "type": "object",
+      "description": "External function declaration. External functions are provided by the environment and have no body. The totality of a program with external functions depends on the totality of those external functions.",
+      "properties": {
+        "kind": { "const": "extern_fn" },
+        "name": { "$ref": "#/definitions/userIdentifier" },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "$ref": "#/definitions/userIdentifier" },
+              "type": { "$ref": "#/definitions/type" }
+            },
+            "required": ["name", "type"]
+          }
+        },
+        "returnType": { "$ref": "#/definitions/type" }
+      },
+      "required": ["kind", "name", "parameters"],
+      "examples": [
+        {
+          "kind": "extern_fn",
+          "name": "get_sensor_value",
+          "parameters": [{ "name": "channel", "type": "u8" }],
+          "returnType": "i32"
+        },
+        {
+          "kind": "extern_fn",
+          "name": "set_led",
+          "parameters": [
+            { "name": "pin", "type": "u8" },
+            { "name": "value", "type": "bool" }
+          ]
+        }
+      ]
+    },
+    
     "constDecl": {
       "type": "object",
       "properties": {
@@ -476,6 +514,11 @@
           "type": "array",
           "items": { "$ref": "#/definitions/constDecl" }
         },
+        "externFns": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/externFn" },
+          "description": "External function declarations. Programs with external functions are total only if all external functions are total."
+        },
         "functions": {
           "type": "array",
           "items": { "$ref": "#/definitions/function" }
@@ -518,6 +561,12 @@
         "description": "all primitive operations terminate",
         "applies_to": "operationExpr",
         "constraint": "all ops in operationName are total"
+      },
+      {
+        "id": "total-extern-fns",
+        "description": "program totality depends on external function totality",
+        "applies_to": "externFn",
+        "constraint": "if all external functions terminate, program terminates; if any external function may not terminate, program may not terminate"
       },
       {
         "id": "reserved-upper-snake-case",

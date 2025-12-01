@@ -25,7 +25,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use embeem_ast::{
-    BinaryOp, Block, ConstDecl, ElseBlock, Expression, Function, Literal,
+    BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal,
     PrimitiveType, Program, RangeDirection, Statement, Type, TypeContext, UnaryOp,
     infer_expression_type,
 };
@@ -139,6 +139,15 @@ impl CCodegen {
             self.emit_line("");
         }
 
+        // Generate external function declarations
+        if !program.extern_fns.is_empty() {
+            self.emit_line("/* External function declarations */");
+            for extern_fn in &program.extern_fns {
+                self.emit_extern_fn_decl(extern_fn)?;
+            }
+            self.emit_line("");
+        }
+
         // Generate function declarations
         for function in &program.functions {
             self.emit_function_decl(function)?;
@@ -241,6 +250,34 @@ impl CCodegen {
         let _c_type = self.type_to_c(&constant.ty);
         let value = self.expr_to_c(&constant.value)?;
         self.emit_line(&format!("#define {} ({})", constant.name, value));
+        Ok(())
+    }
+
+    /// Emit an external function declaration.
+    ///
+    /// External functions are declared as `extern` in C, meaning they must be
+    /// provided by the environment (linked from another object file or library).
+    fn emit_extern_fn_decl(&mut self, extern_fn: &ExternFn) -> Result<(), CodegenError> {
+        let return_type = match &extern_fn.return_type {
+            Some(ty) => self.type_to_c(ty),
+            None => "void".to_string(),
+        };
+
+        let params = extern_fn
+            .params
+            .iter()
+            .map(|p| format!("{} {}", self.type_to_c(&p.ty), p.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let params = if params.is_empty() {
+            "void".to_string()
+        } else {
+            params
+        };
+
+        // External functions are not mangled - they use their declared name directly
+        self.emit_line(&format!("extern {} {}({});", return_type, extern_fn.name, params));
         Ok(())
     }
 
@@ -537,8 +574,14 @@ impl CCodegen {
                 let arg_strs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.expr_to_c(a)).collect();
                 let arg_strs = arg_strs?;
-                let mangled_name = self.mangle_name(function);
-                Ok(format!("{}({})", mangled_name, arg_strs.join(", ")))
+                // External functions use their declared name directly (no mangling)
+                // Regular functions get the mangle prefix
+                let name = if self.type_ctx.is_extern_fn(function) {
+                    function.clone()
+                } else {
+                    self.mangle_name(function)
+                };
+                Ok(format!("{}({})", name, arg_strs.join(", ")))
             }
 
             Expression::Block(blk) => {
@@ -1137,5 +1180,38 @@ mod tests {
         let c_code = compile_to_c(&program).unwrap();
         // y should be inferred as uint16_t from x
         assert!(c_code.contains("uint16_t y = "), "Expected uint16_t for variable reference, got:\n{}", c_code);
+    }
+
+    #[test]
+    fn test_extern_fn() {
+        let src = r#"
+            extern fn get_sensor_value(channel: u8) -> i32;
+            extern fn set_led(pin: u8, value: bool);
+            extern fn init_system();
+            
+            fn main() {
+                init_system();
+                let val = get_sensor_value(0);
+                set_led(13, val > 100);
+            }
+        "#;
+        let program = parse_program(src).unwrap();
+        let c_code = compile_to_c(&program).unwrap();
+        
+        // Check external function declarations are generated
+        assert!(c_code.contains("extern int32_t get_sensor_value(uint8_t channel);"), 
+            "Expected extern declaration, got:\n{}", c_code);
+        assert!(c_code.contains("extern void set_led(uint8_t pin, bool value);"), 
+            "Expected extern declaration, got:\n{}", c_code);
+        assert!(c_code.contains("extern void init_system(void);"), 
+            "Expected extern declaration, got:\n{}", c_code);
+        
+        // Check that external functions are called (not mangled)
+        assert!(c_code.contains("init_system();"), 
+            "Expected call to init_system, got:\n{}", c_code);
+        assert!(c_code.contains("get_sensor_value("), 
+            "Expected call to get_sensor_value, got:\n{}", c_code);
+        assert!(c_code.contains("set_led("), 
+            "Expected call to set_led, got:\n{}", c_code);
     }
 }

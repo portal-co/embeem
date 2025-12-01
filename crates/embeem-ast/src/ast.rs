@@ -9,6 +9,8 @@ use alloc::vec::Vec;
 pub struct Program {
     /// Constant declarations.
     pub constants: Vec<ConstDecl>,
+    /// External function declarations.
+    pub extern_fns: Vec<ExternFn>,
     /// Function definitions.
     pub functions: Vec<Function>,
 }
@@ -22,6 +24,23 @@ pub struct ConstDecl {
     pub ty: Type,
     /// Value expression.
     pub value: Expression,
+}
+
+/// An external function declaration.
+///
+/// External functions are provided by the environment and called like regular functions.
+/// They must be declared with their signature before use.
+///
+/// The totality of a program with external functions depends on the totality of those
+/// external functions. See the TOTALITY documentation for details.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternFn {
+    /// Name of the external function.
+    pub name: String,
+    /// Parameters.
+    pub params: Vec<Param>,
+    /// Return type (optional, defaults to unit).
+    pub return_type: Option<Type>,
 }
 
 /// A function definition.

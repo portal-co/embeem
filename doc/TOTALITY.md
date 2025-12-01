@@ -138,7 +138,7 @@ Since all expression forms terminate, the lemma holds. ∎
 
 ### 3.6 Main Theorem
 
-**Theorem 3.5**: Every well-typed Embeem program terminates.
+**Theorem 3.5 (Totality without External Functions)**: Every well-typed Embeem program *without external functions* terminates.
 
 *Proof*: 
 1. A program's execution starts at `main`
@@ -150,6 +150,47 @@ Since all expression forms terminate, the lemma holds. ∎
 7. Therefore, the program terminates
 
 ∎
+
+### 3.7 External Functions
+
+External functions are provided by the environment and declared without a body:
+
+```embeem
+extern fn get_sensor_value(channel: u8) -> i32;
+extern fn set_led(pin: u8, value: bool);
+```
+
+**Definition 3.6 (Total External Function)**: An external function $e$ is *total* if every call to $e$ with valid arguments returns in finite time.
+
+**Theorem 3.7 (Conditional Totality with External Functions)**: An Embeem program $P$ with external functions $E = \{e_1, e_2, \ldots, e_k\}$ terminates *if and only if* all external functions in $E$ are total.
+
+*Proof (⟹)*: 
+If all external functions terminate, then:
+1. Lemma 3.3 extends: calls to external functions terminate by assumption
+2. All other lemmas hold unchanged
+3. By Theorem 3.5's proof structure, the program terminates
+
+*Proof (⟸)*:
+If some external function $e_i$ does not terminate:
+1. Construct a program that calls $e_i$
+2. The call to $e_i$ does not return
+3. The program does not terminate
+
+∎
+
+**Corollary 3.8 (Bounds with External Functions)**: If external function $e_i$ has worst-case execution time $T_i$, then the program's WCET can be computed by substituting $T_i$ for each call to $e_i$.
+
+### 3.8 Pure Embeem Programs
+
+**Definition 3.9 (Pure Embeem Program)**: A program is *pure* if it contains no external function declarations.
+
+**Theorem 3.10 (Unconditional Totality)**: Every pure Embeem program terminates unconditionally.
+
+*Proof*: Direct consequence of Theorem 3.5. ∎
+
+This distinction is important for embedded systems:
+- **Pure programs**: Guaranteed to terminate, suitable for safety-critical applications
+- **Programs with external functions**: Termination depends on the environment's guarantees
 
 ## 4. Complexity Bounds
 
