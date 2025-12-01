@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use alloc::format;
 
 use crate::ast::*;
-use crate::ops::op_name_from_str;
+use crate::ops::op_kind_from_str;
 
 /// Context for pretty-printing, holding information about external function arities.
 #[derive(Clone, Debug, Default)]
@@ -47,8 +47,37 @@ impl PrettyPrintContext {
     }
 
     /// Get the arity of an operation by name.
+    ///
+    /// Note: For path-based operations, the arity depends on the full path,
+    /// not just a single segment. This function only provides arity for
+    /// primitive single-segment operations (ADD, SUB, etc.).
     pub fn operation_arity(name: &str) -> Option<usize> {
-        op_name_from_str(name).map(|op| op.arity())
+        op_kind_from_str(name).and_then(|op| {
+            if op.is_primitive() {
+                // Primitive operations have fixed arities
+                Some(match op {
+                    // Nullary
+                    crate::ops::OpKind::Nop
+                    | crate::ops::OpKind::Halt
+                    | crate::ops::OpKind::Sleep => 0,
+
+                    // Unary
+                    crate::ops::OpKind::Inc
+                    | crate::ops::OpKind::Dec
+                    | crate::ops::OpKind::Neg
+                    | crate::ops::OpKind::Abs
+                    | crate::ops::OpKind::Not
+                    | crate::ops::OpKind::FSqrt
+                    | crate::ops::OpKind::FAbs => 1,
+
+                    // Binary (all other primitives)
+                    _ => 2,
+                })
+            } else {
+                // Non-primitive segments don't have standalone arity
+                None
+            }
+        })
     }
 
     fn indent_str(&self) -> String {

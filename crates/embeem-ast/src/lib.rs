@@ -30,7 +30,7 @@ mod infer;
 #[cfg(feature = "alloc")]
 pub use ast::*;
 #[cfg(feature = "alloc")]
-pub use ops::{is_upper_snake_case, is_valid_user_identifier, op_name_from_str, OpKind};
+pub use ops::{is_upper_snake_case, is_valid_user_identifier, op_kind_from_str, OpKind};
 #[cfg(feature = "alloc")]
 pub use pretty::{pretty_print_program, PrettyPrint, PrettyPrintContext};
 

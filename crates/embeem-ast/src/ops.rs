@@ -6,7 +6,9 @@
 //!
 //! This module provides:
 //! - Functions to validate identifier naming conventions
-//! - `OpKind` enum for known built-in operations with their arities
+//! - `OpAction` enum for operation actions (READ, WRITE, INIT, etc.)
+//! - `OpTarget` enum for operation targets (GPIO, ADC, UART, etc.)
+//! - `OpKind` enum combining action and target for path-based operations
 //! - Lookup functions for operation metadata
 
 /// Check if an identifier follows UPPER_SNAKE_CASE pattern.
@@ -71,9 +73,105 @@ pub fn is_valid_user_identifier(s: &str) -> bool {
     !is_upper_snake_case(s)
 }
 
-/// Get the operation name from its string representation.
-pub fn op_name_from_str(name: &str) -> Option<OpKind> {
+/// Get the operation segment from its string representation.
+///
+/// Each segment represents a single element of an operation path.
+/// For example, `READ(GPIO(pin))` has path `["READ", "GPIO"]` where
+/// each string maps to an `OpKind`.
+pub fn op_kind_from_str(name: &str) -> Option<OpKind> {
     match name {
+        // Actions (verbs - typically first in path)
+        "READ" => Some(OpKind::Read),
+        "WRITE" => Some(OpKind::Write),
+        "INIT" => Some(OpKind::Init),
+        "START" => Some(OpKind::Start),
+        "STOP" => Some(OpKind::Stop),
+        "RESET" => Some(OpKind::Reset),
+        "TOGGLE" => Some(OpKind::Toggle),
+        "ENABLE" => Some(OpKind::Enable),
+        "DISABLE" => Some(OpKind::Disable),
+        "TRANSFER" => Some(OpKind::Transfer),
+        "SEND" => Some(OpKind::Send),
+        "RECEIVE" => Some(OpKind::Receive),
+        "SCAN" => Some(OpKind::Scan),
+        "CONNECT" => Some(OpKind::Connect),
+        "DISCONNECT" => Some(OpKind::Disconnect),
+        "FLUSH" => Some(OpKind::Flush),
+        "AVAILABLE" => Some(OpKind::Available),
+        "ERASE" => Some(OpKind::Erase),
+        "UPDATE" => Some(OpKind::Update),
+        "CONFIG" => Some(OpKind::Config),
+        "ENTER" => Some(OpKind::Enter),
+        "GET" => Some(OpKind::Get),
+        "SET" => Some(OpKind::Set),
+        "BEGIN" => Some(OpKind::Begin),
+        "END" => Some(OpKind::End),
+        "FIND" => Some(OpKind::Find),
+        "COUNT" => Some(OpKind::Count),
+        "CLEAR" => Some(OpKind::Clear),
+        "TEST" => Some(OpKind::Test),
+        "DELAY" => Some(OpKind::Delay),
+
+        // Targets (nouns - typically second in path)
+        "GPIO" => Some(OpKind::Gpio),
+        "PORT" => Some(OpKind::Port),
+        "ADC" => Some(OpKind::Adc),
+        "DAC" => Some(OpKind::Dac),
+        "PWM" => Some(OpKind::Pwm),
+        "TIMER" => Some(OpKind::Timer),
+        "UART" => Some(OpKind::Uart),
+        "SPI" => Some(OpKind::Spi),
+        "I2C" => Some(OpKind::I2c),
+        "CAN" => Some(OpKind::Can),
+        "USB" => Some(OpKind::Usb),
+        "DMA" => Some(OpKind::Dma),
+        "WDT" => Some(OpKind::Wdt),
+        "EEPROM" => Some(OpKind::Eeprom),
+        "FLASH" => Some(OpKind::Flash),
+        "RTC" => Some(OpKind::Rtc),
+        "PERIPHERAL" => Some(OpKind::Peripheral),
+
+        // Modifiers/Properties (typically third+ in path)
+        "MODE" => Some(OpKind::Mode),
+        "FREQUENCY" => Some(OpKind::Frequency),
+        "DUTY_CYCLE" => Some(OpKind::DutyCycle),
+        "PULSE_WIDTH" => Some(OpKind::PulseWidth),
+        "PERIOD" => Some(OpKind::Period),
+        "COMPARE" => Some(OpKind::Compare),
+        "BAUD_RATE" => Some(OpKind::BaudRate),
+        "CLOCK" => Some(OpKind::Clock),
+        "CLOCK_SPEED" => Some(OpKind::ClockSpeed),
+        "BIT_ORDER" => Some(OpKind::BitOrder),
+        "FILTER" => Some(OpKind::Filter),
+        "BITRATE" => Some(OpKind::Bitrate),
+        "TIMEOUT" => Some(OpKind::Timeout),
+        "SOURCE" => Some(OpKind::Source),
+        "DESTINATION" => Some(OpKind::Destination),
+        "RESOLUTION" => Some(OpKind::Resolution),
+        "REFERENCE" => Some(OpKind::Reference),
+        "POWER_MODE" => Some(OpKind::PowerMode),
+        "TIME" => Some(OpKind::Time),
+        "ALARM" => Some(OpKind::Alarm),
+        "CALENDAR" => Some(OpKind::Calendar),
+        "MILLIS" => Some(OpKind::Millis),
+        "MICROS" => Some(OpKind::Micros),
+        "MS" => Some(OpKind::Ms),
+        "US" => Some(OpKind::Us),
+        "BYTE" => Some(OpKind::Byte),
+        "BUFFER" => Some(OpKind::Buffer),
+        "MULTI" => Some(OpKind::Multi),
+        "CONVERSION" => Some(OpKind::Conversion),
+        "TRANSACTION" => Some(OpKind::Transaction),
+        "TO" => Some(OpKind::To),
+        "FROM" => Some(OpKind::From),
+        "BIT" => Some(OpKind::Bit),
+        "ONES" => Some(OpKind::Ones),
+        "ZEROS" => Some(OpKind::Zeros),
+        "FIRST" => Some(OpKind::First),
+        "STANDBY" => Some(OpKind::Standby),
+        "DEEP_SLEEP" => Some(OpKind::DeepSleep),
+
+        // Arithmetic operations (single-segment operations)
         "ADD" => Some(OpKind::Add),
         "SUB" => Some(OpKind::Sub),
         "MUL" => Some(OpKind::Mul),
@@ -83,6 +181,8 @@ pub fn op_name_from_str(name: &str) -> Option<OpKind> {
         "DEC" => Some(OpKind::Dec),
         "NEG" => Some(OpKind::Neg),
         "ABS" => Some(OpKind::Abs),
+
+        // Logical/Bitwise operations (single-segment)
         "AND" => Some(OpKind::And),
         "OR" => Some(OpKind::Or),
         "XOR" => Some(OpKind::Xor),
@@ -92,25 +192,22 @@ pub fn op_name_from_str(name: &str) -> Option<OpKind> {
         "SAR" => Some(OpKind::Sar),
         "ROL" => Some(OpKind::Rol),
         "ROR" => Some(OpKind::Ror),
+
+        // Comparison operations (single-segment)
         "CMP" => Some(OpKind::Cmp),
-        "TEST" => Some(OpKind::Test),
         "EQ" => Some(OpKind::Eq),
         "NE" => Some(OpKind::Ne),
         "LT" => Some(OpKind::Lt),
         "LE" => Some(OpKind::Le),
         "GT" => Some(OpKind::Gt),
         "GE" => Some(OpKind::Ge),
+
+        // Control flow (single-segment)
         "NOP" => Some(OpKind::Nop),
         "HALT" => Some(OpKind::Halt),
         "SLEEP" => Some(OpKind::Sleep),
-        "SET_BIT" => Some(OpKind::SetBit),
-        "CLEAR_BIT" => Some(OpKind::ClearBit),
-        "TOGGLE_BIT" => Some(OpKind::ToggleBit),
-        "TEST_BIT" => Some(OpKind::TestBit),
-        "COUNT_ONES" => Some(OpKind::CountOnes),
-        "COUNT_ZEROS" => Some(OpKind::CountZeros),
-        "FIND_FIRST_SET" => Some(OpKind::FindFirstSet),
-        "FIND_FIRST_ZERO" => Some(OpKind::FindFirstZero),
+
+        // Floating point prefix
         "FADD" => Some(OpKind::FAdd),
         "FSUB" => Some(OpKind::FSub),
         "FMUL" => Some(OpKind::FMul),
@@ -118,404 +215,530 @@ pub fn op_name_from_str(name: &str) -> Option<OpKind> {
         "FSQRT" => Some(OpKind::FSqrt),
         "FABS" => Some(OpKind::FAbs),
         "FCMP" => Some(OpKind::FCmp),
-        "GPIO_READ" => Some(OpKind::GpioRead),
-        "GPIO_WRITE" => Some(OpKind::GpioWrite),
-        "GPIO_TOGGLE" => Some(OpKind::GpioToggle),
-        "GPIO_SET_MODE" => Some(OpKind::GpioSetMode),
-        "GPIO_READ_PORT" => Some(OpKind::GpioReadPort),
-        "GPIO_WRITE_PORT" => Some(OpKind::GpioWritePort),
-        "ADC_READ" => Some(OpKind::AdcRead),
-        "ADC_START_CONVERSION" => Some(OpKind::AdcStartConversion),
-        "ADC_READ_MULTI" => Some(OpKind::AdcReadMulti),
-        "DAC_WRITE" => Some(OpKind::DacWrite),
-        "ADC_SET_RESOLUTION" => Some(OpKind::AdcSetResolution),
-        "ADC_SET_REFERENCE" => Some(OpKind::AdcSetReference),
-        "PWM_START" => Some(OpKind::PwmStart),
-        "PWM_STOP" => Some(OpKind::PwmStop),
-        "PWM_SET_DUTY_CYCLE" => Some(OpKind::PwmSetDutyCycle),
-        "PWM_SET_FREQUENCY" => Some(OpKind::PwmSetFrequency),
-        "PWM_SET_PULSE_WIDTH" => Some(OpKind::PwmSetPulseWidth),
-        "TIMER_START" => Some(OpKind::TimerStart),
-        "TIMER_STOP" => Some(OpKind::TimerStop),
-        "TIMER_RESET" => Some(OpKind::TimerReset),
-        "TIMER_READ" => Some(OpKind::TimerRead),
-        "TIMER_SET_PERIOD" => Some(OpKind::TimerSetPeriod),
-        "TIMER_SET_COMPARE" => Some(OpKind::TimerSetCompare),
-        "GET_MILLIS" => Some(OpKind::GetMillis),
-        "GET_MICROS" => Some(OpKind::GetMicros),
-        "DELAY_MS" => Some(OpKind::DelayMs),
-        "DELAY_US" => Some(OpKind::DelayUs),
-        "UART_INIT" => Some(OpKind::UartInit),
-        "UART_WRITE_BYTE" => Some(OpKind::UartWriteByte),
-        "UART_WRITE_BUFFER" => Some(OpKind::UartWriteBuffer),
-        "UART_READ_BYTE" => Some(OpKind::UartReadByte),
-        "UART_READ_BUFFER" => Some(OpKind::UartReadBuffer),
-        "UART_AVAILABLE" => Some(OpKind::UartAvailable),
-        "UART_FLUSH" => Some(OpKind::UartFlush),
-        "UART_SET_BAUD_RATE" => Some(OpKind::UartSetBaudRate),
-        "SPI_INIT" => Some(OpKind::SpiInit),
-        "SPI_TRANSFER" => Some(OpKind::SpiTransfer),
-        "SPI_TRANSFER_BUFFER" => Some(OpKind::SpiTransferBuffer),
-        "SPI_SET_MODE" => Some(OpKind::SpiSetMode),
-        "SPI_SET_CLOCK" => Some(OpKind::SpiSetClock),
-        "SPI_SET_BIT_ORDER" => Some(OpKind::SpiSetBitOrder),
-        "SPI_BEGIN_TRANSACTION" => Some(OpKind::SpiBeginTransaction),
-        "SPI_END_TRANSACTION" => Some(OpKind::SpiEndTransaction),
-        "I2C_INIT" => Some(OpKind::I2cInit),
-        "I2C_START" => Some(OpKind::I2cStart),
-        "I2C_STOP" => Some(OpKind::I2cStop),
-        "I2C_WRITE" => Some(OpKind::I2cWrite),
-        "I2C_READ" => Some(OpKind::I2cRead),
-        "I2C_WRITE_TO" => Some(OpKind::I2cWriteTo),
-        "I2C_READ_FROM" => Some(OpKind::I2cReadFrom),
-        "I2C_SET_CLOCK" => Some(OpKind::I2cSetClock),
-        "I2C_SCAN" => Some(OpKind::I2cScan),
-        "CAN_INIT" => Some(OpKind::CanInit),
-        "CAN_SEND" => Some(OpKind::CanSend),
-        "CAN_RECEIVE" => Some(OpKind::CanReceive),
-        "CAN_SET_FILTER" => Some(OpKind::CanSetFilter),
-        "CAN_SET_BITRATE" => Some(OpKind::CanSetBitrate),
-        "USB_INIT" => Some(OpKind::UsbInit),
-        "USB_CONNECT" => Some(OpKind::UsbConnect),
-        "USB_DISCONNECT" => Some(OpKind::UsbDisconnect),
-        "USB_WRITE" => Some(OpKind::UsbWrite),
-        "USB_READ" => Some(OpKind::UsbRead),
-        "USB_AVAILABLE" => Some(OpKind::UsbAvailable),
-        "WDT_ENABLE" => Some(OpKind::WdtEnable),
-        "WDT_DISABLE" => Some(OpKind::WdtDisable),
-        "WDT_RESET" => Some(OpKind::WdtReset),
-        "WDT_SET_TIMEOUT" => Some(OpKind::WdtSetTimeout),
-        "DMA_INIT" => Some(OpKind::DmaInit),
-        "DMA_START" => Some(OpKind::DmaStart),
-        "DMA_STOP" => Some(OpKind::DmaStop),
-        "DMA_CONFIG" => Some(OpKind::DmaConfig),
-        "DMA_SET_SOURCE" => Some(OpKind::DmaSetSource),
-        "DMA_SET_DESTINATION" => Some(OpKind::DmaSetDestination),
-        "EEPROM_READ" => Some(OpKind::EepromRead),
-        "EEPROM_WRITE" => Some(OpKind::EepromWrite),
-        "EEPROM_UPDATE" => Some(OpKind::EepromUpdate),
-        "FLASH_READ" => Some(OpKind::FlashRead),
-        "FLASH_WRITE" => Some(OpKind::FlashWrite),
-        "FLASH_ERASE" => Some(OpKind::FlashErase),
-        "SET_POWER_MODE" => Some(OpKind::SetPowerMode),
-        "DISABLE_PERIPHERAL" => Some(OpKind::DisablePeripheral),
-        "ENABLE_PERIPHERAL" => Some(OpKind::EnablePeripheral),
-        "SET_CLOCK_SPEED" => Some(OpKind::SetClockSpeed),
-        "ENTER_STANDBY" => Some(OpKind::EnterStandby),
-        "ENTER_DEEP_SLEEP" => Some(OpKind::EnterDeepSleep),
-        "RTC_INIT" => Some(OpKind::RtcInit),
-        "RTC_SET_TIME" => Some(OpKind::RtcSetTime),
-        "RTC_GET_TIME" => Some(OpKind::RtcGetTime),
-        "RTC_SET_ALARM" => Some(OpKind::RtcSetAlarm),
-        "RTC_SET_CALENDAR" => Some(OpKind::RtcSetCalendar),
+
         _ => None,
     }
 }
 
-/// Operation kinds (for parsing).
+/// Operation path segment kinds.
+///
+/// Each variant represents a single segment of an operation path.
+/// Operations are built by combining segments into paths, e.g.:
+/// - `["READ", "GPIO"]` for `READ(GPIO(pin))`
+/// - `["SET", "DUTY_CYCLE", "PWM"]` for `SET(DUTY_CYCLE(PWM(ch)), val)`
+/// - `["ADD"]` for `ADD(a, b)` (single-segment arithmetic)
+///
+/// Segments are categorized as:
+/// - **Actions**: Verbs like READ, WRITE, INIT (typically first in path)
+/// - **Targets**: Peripherals like GPIO, ADC, UART (typically second)
+/// - **Modifiers**: Properties like MODE, FREQUENCY (typically third+)
+/// - **Primitives**: Single-segment operations like ADD, SUB
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum OpKind {
-    // Arithmetic
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
-    Inc,
-    Dec,
-    Neg,
-    Abs,
-    // Logical/Bitwise
-    And,
-    Or,
-    Xor,
-    Not,
-    Shl,
-    Shr,
-    Sar,
-    Rol,
-    Ror,
-    // Comparison
-    Cmp,
+    // ===== Actions (verbs) =====
+    /// Read operation
+    Read,
+    /// Write operation
+    Write,
+    /// Initialize
+    Init,
+    /// Start
+    Start,
+    /// Stop
+    Stop,
+    /// Reset
+    Reset,
+    /// Toggle state
+    Toggle,
+    /// Enable
+    Enable,
+    /// Disable
+    Disable,
+    /// Transfer data
+    Transfer,
+    /// Send data
+    Send,
+    /// Receive data
+    Receive,
+    /// Scan for devices
+    Scan,
+    /// Connect
+    Connect,
+    /// Disconnect
+    Disconnect,
+    /// Flush buffers
+    Flush,
+    /// Check availability
+    Available,
+    /// Erase
+    Erase,
+    /// Update
+    Update,
+    /// Configure
+    Config,
+    /// Enter a state/mode
+    Enter,
+    /// Get a value
+    Get,
+    /// Set a value
+    Set,
+    /// Begin transaction/operation
+    Begin,
+    /// End transaction/operation
+    End,
+    /// Find something
+    Find,
+    /// Count something
+    Count,
+    /// Clear something
+    Clear,
+    /// Test something
     Test,
+    /// Delay execution
+    Delay,
+
+    // ===== Targets (peripherals/nouns) =====
+    /// GPIO pin
+    Gpio,
+    /// GPIO port
+    Port,
+    /// Analog-to-digital converter
+    Adc,
+    /// Digital-to-analog converter
+    Dac,
+    /// Pulse-width modulation
+    Pwm,
+    /// Hardware timer
+    Timer,
+    /// UART serial
+    Uart,
+    /// SPI bus
+    Spi,
+    /// I2C bus
+    I2c,
+    /// CAN bus
+    Can,
+    /// USB
+    Usb,
+    /// DMA controller
+    Dma,
+    /// Watchdog timer
+    Wdt,
+    /// EEPROM memory
+    Eeprom,
+    /// Flash memory
+    Flash,
+    /// Real-time clock
+    Rtc,
+    /// Generic peripheral
+    Peripheral,
+
+    // ===== Modifiers/Properties =====
+    /// Operating mode
+    Mode,
+    /// Frequency setting
+    Frequency,
+    /// PWM duty cycle
+    DutyCycle,
+    /// Pulse width
+    PulseWidth,
+    /// Timer period
+    Period,
+    /// Compare value
+    Compare,
+    /// UART baud rate
+    BaudRate,
+    /// Clock signal
+    Clock,
+    /// Clock speed
+    ClockSpeed,
+    /// Bit order (MSB/LSB first)
+    BitOrder,
+    /// CAN filter
+    Filter,
+    /// CAN bitrate
+    Bitrate,
+    /// Timeout value
+    Timeout,
+    /// DMA source
+    Source,
+    /// DMA destination
+    Destination,
+    /// ADC resolution
+    Resolution,
+    /// ADC reference voltage
+    Reference,
+    /// Power mode
+    PowerMode,
+    /// Time value
+    Time,
+    /// Alarm setting
+    Alarm,
+    /// Calendar setting
+    Calendar,
+    /// Milliseconds
+    Millis,
+    /// Microseconds
+    Micros,
+    /// Milliseconds (short form)
+    Ms,
+    /// Microseconds (short form)
+    Us,
+    /// Single byte
+    Byte,
+    /// Data buffer
+    Buffer,
+    /// Multiple channels
+    Multi,
+    /// ADC conversion
+    Conversion,
+    /// SPI transaction
+    Transaction,
+    /// Direction: to
+    To,
+    /// Direction: from
+    From,
+    /// Single bit
+    Bit,
+    /// Count of ones
+    Ones,
+    /// Count of zeros
+    Zeros,
+    /// First occurrence
+    First,
+    /// Standby mode
+    Standby,
+    /// Deep sleep mode
+    DeepSleep,
+
+    // ===== Arithmetic (single-segment) =====
+    /// Addition
+    Add,
+    /// Subtraction
+    Sub,
+    /// Multiplication
+    Mul,
+    /// Division
+    Div,
+    /// Modulo
+    Mod,
+    /// Increment
+    Inc,
+    /// Decrement
+    Dec,
+    /// Negate
+    Neg,
+    /// Absolute value
+    Abs,
+
+    // ===== Logical/Bitwise (single-segment) =====
+    /// Bitwise AND
+    And,
+    /// Bitwise OR
+    Or,
+    /// Bitwise XOR
+    Xor,
+    /// Bitwise NOT
+    Not,
+    /// Shift left
+    Shl,
+    /// Shift right (logical)
+    Shr,
+    /// Shift arithmetic right
+    Sar,
+    /// Rotate left
+    Rol,
+    /// Rotate right
+    Ror,
+
+    // ===== Comparison (single-segment) =====
+    /// Compare
+    Cmp,
+    /// Equal
     Eq,
+    /// Not equal
     Ne,
+    /// Less than
     Lt,
+    /// Less than or equal
     Le,
+    /// Greater than
     Gt,
+    /// Greater than or equal
     Ge,
-    // Control Flow
+
+    // ===== Control Flow (single-segment) =====
+    /// No operation
     Nop,
+    /// Halt execution
     Halt,
+    /// Sleep/low power
     Sleep,
-    // Bit Manipulation
-    SetBit,
-    ClearBit,
-    ToggleBit,
-    TestBit,
-    CountOnes,
-    CountZeros,
-    FindFirstSet,
-    FindFirstZero,
-    // Floating Point
+
+    // ===== Floating Point (single-segment) =====
+    /// Floating-point addition
     FAdd,
+    /// Floating-point subtraction
     FSub,
+    /// Floating-point multiplication
     FMul,
+    /// Floating-point division
     FDiv,
+    /// Floating-point square root
     FSqrt,
+    /// Floating-point absolute value
     FAbs,
+    /// Floating-point compare
     FCmp,
-    // GPIO
-    GpioRead,
-    GpioWrite,
-    GpioToggle,
-    GpioSetMode,
-    GpioReadPort,
-    GpioWritePort,
-    // Analog
-    AdcRead,
-    AdcStartConversion,
-    AdcReadMulti,
-    DacWrite,
-    AdcSetResolution,
-    AdcSetReference,
-    // PWM
-    PwmStart,
-    PwmStop,
-    PwmSetDutyCycle,
-    PwmSetFrequency,
-    PwmSetPulseWidth,
-    // Timer
-    TimerStart,
-    TimerStop,
-    TimerReset,
-    TimerRead,
-    TimerSetPeriod,
-    TimerSetCompare,
-    GetMillis,
-    GetMicros,
-    DelayMs,
-    DelayUs,
-    // UART
-    UartInit,
-    UartWriteByte,
-    UartWriteBuffer,
-    UartReadByte,
-    UartReadBuffer,
-    UartAvailable,
-    UartFlush,
-    UartSetBaudRate,
-    // SPI
-    SpiInit,
-    SpiTransfer,
-    SpiTransferBuffer,
-    SpiSetMode,
-    SpiSetClock,
-    SpiSetBitOrder,
-    SpiBeginTransaction,
-    SpiEndTransaction,
-    // I2C
-    I2cInit,
-    I2cStart,
-    I2cStop,
-    I2cWrite,
-    I2cRead,
-    I2cWriteTo,
-    I2cReadFrom,
-    I2cSetClock,
-    I2cScan,
-    // CAN
-    CanInit,
-    CanSend,
-    CanReceive,
-    CanSetFilter,
-    CanSetBitrate,
-    // USB
-    UsbInit,
-    UsbConnect,
-    UsbDisconnect,
-    UsbWrite,
-    UsbRead,
-    UsbAvailable,
-    // Watchdog
-    WdtEnable,
-    WdtDisable,
-    WdtReset,
-    WdtSetTimeout,
-    // DMA
-    DmaInit,
-    DmaStart,
-    DmaStop,
-    DmaConfig,
-    DmaSetSource,
-    DmaSetDestination,
-    // EEPROM/Flash
-    EepromRead,
-    EepromWrite,
-    EepromUpdate,
-    FlashRead,
-    FlashWrite,
-    FlashErase,
-    // Power Management
-    SetPowerMode,
-    DisablePeripheral,
-    EnablePeripheral,
-    SetClockSpeed,
-    EnterStandby,
-    EnterDeepSleep,
-    // RTC
-    RtcInit,
-    RtcSetTime,
-    RtcGetTime,
-    RtcSetAlarm,
-    RtcSetCalendar,
 }
 
 impl OpKind {
-    /// Get the number of arguments expected for this operation.
-    pub fn arity(self) -> usize {
+    /// Get the string representation of this operation segment.
+    pub fn as_str(self) -> &'static str {
         match self {
-            // Nullary
-            OpKind::Nop
-            | OpKind::Halt
-            | OpKind::Sleep
-            | OpKind::GetMillis
-            | OpKind::GetMicros
-            | OpKind::WdtEnable
-            | OpKind::WdtDisable
-            | OpKind::WdtReset
-            | OpKind::EnterStandby
-            | OpKind::EnterDeepSleep
-            | OpKind::RtcGetTime => 0,
+            // Actions
+            OpKind::Read => "READ",
+            OpKind::Write => "WRITE",
+            OpKind::Init => "INIT",
+            OpKind::Start => "START",
+            OpKind::Stop => "STOP",
+            OpKind::Reset => "RESET",
+            OpKind::Toggle => "TOGGLE",
+            OpKind::Enable => "ENABLE",
+            OpKind::Disable => "DISABLE",
+            OpKind::Transfer => "TRANSFER",
+            OpKind::Send => "SEND",
+            OpKind::Receive => "RECEIVE",
+            OpKind::Scan => "SCAN",
+            OpKind::Connect => "CONNECT",
+            OpKind::Disconnect => "DISCONNECT",
+            OpKind::Flush => "FLUSH",
+            OpKind::Available => "AVAILABLE",
+            OpKind::Erase => "ERASE",
+            OpKind::Update => "UPDATE",
+            OpKind::Config => "CONFIG",
+            OpKind::Enter => "ENTER",
+            OpKind::Get => "GET",
+            OpKind::Set => "SET",
+            OpKind::Begin => "BEGIN",
+            OpKind::End => "END",
+            OpKind::Find => "FIND",
+            OpKind::Count => "COUNT",
+            OpKind::Clear => "CLEAR",
+            OpKind::Test => "TEST",
+            OpKind::Delay => "DELAY",
 
-            // Unary
-            OpKind::Inc
-            | OpKind::Dec
-            | OpKind::Neg
-            | OpKind::Abs
-            | OpKind::Not
-            | OpKind::CountOnes
-            | OpKind::CountZeros
-            | OpKind::FindFirstSet
-            | OpKind::FindFirstZero
-            | OpKind::FSqrt
-            | OpKind::FAbs
-            | OpKind::GpioRead
-            | OpKind::GpioToggle
-            | OpKind::GpioReadPort
-            | OpKind::AdcRead
-            | OpKind::AdcStartConversion
-            | OpKind::AdcReadMulti
-            | OpKind::AdcSetResolution
-            | OpKind::AdcSetReference
-            | OpKind::PwmStart
-            | OpKind::PwmStop
-            | OpKind::TimerStart
-            | OpKind::TimerStop
-            | OpKind::TimerReset
-            | OpKind::TimerRead
-            | OpKind::DelayMs
-            | OpKind::DelayUs
-            | OpKind::UartInit
-            | OpKind::UartReadByte
-            | OpKind::UartAvailable
-            | OpKind::UartFlush
-            | OpKind::SpiInit
-            | OpKind::SpiBeginTransaction
-            | OpKind::SpiEndTransaction
-            | OpKind::I2cInit
-            | OpKind::I2cStart
-            | OpKind::I2cStop
-            | OpKind::I2cRead
-            | OpKind::I2cScan
-            | OpKind::CanInit
-            | OpKind::CanReceive
-            | OpKind::UsbInit
-            | OpKind::UsbConnect
-            | OpKind::UsbDisconnect
-            | OpKind::UsbRead
-            | OpKind::UsbAvailable
-            | OpKind::WdtSetTimeout
-            | OpKind::DmaInit
-            | OpKind::DmaStart
-            | OpKind::DmaStop
-            | OpKind::EepromRead
-            | OpKind::FlashRead
-            | OpKind::FlashErase
-            | OpKind::SetPowerMode
-            | OpKind::DisablePeripheral
-            | OpKind::EnablePeripheral
-            | OpKind::SetClockSpeed
-            | OpKind::RtcInit
-            | OpKind::RtcSetTime
-            | OpKind::RtcSetAlarm
-            | OpKind::RtcSetCalendar => 1,
+            // Targets
+            OpKind::Gpio => "GPIO",
+            OpKind::Port => "PORT",
+            OpKind::Adc => "ADC",
+            OpKind::Dac => "DAC",
+            OpKind::Pwm => "PWM",
+            OpKind::Timer => "TIMER",
+            OpKind::Uart => "UART",
+            OpKind::Spi => "SPI",
+            OpKind::I2c => "I2C",
+            OpKind::Can => "CAN",
+            OpKind::Usb => "USB",
+            OpKind::Dma => "DMA",
+            OpKind::Wdt => "WDT",
+            OpKind::Eeprom => "EEPROM",
+            OpKind::Flash => "FLASH",
+            OpKind::Rtc => "RTC",
+            OpKind::Peripheral => "PERIPHERAL",
 
-            // Binary
-            OpKind::Add
-            | OpKind::Sub
-            | OpKind::Mul
-            | OpKind::Div
-            | OpKind::Mod
-            | OpKind::And
-            | OpKind::Or
-            | OpKind::Xor
-            | OpKind::Shl
-            | OpKind::Shr
-            | OpKind::Sar
-            | OpKind::Rol
-            | OpKind::Ror
-            | OpKind::Cmp
-            | OpKind::Test
-            | OpKind::Eq
-            | OpKind::Ne
-            | OpKind::Lt
-            | OpKind::Le
-            | OpKind::Gt
-            | OpKind::Ge
-            | OpKind::SetBit
-            | OpKind::ClearBit
-            | OpKind::ToggleBit
-            | OpKind::TestBit
-            | OpKind::FAdd
-            | OpKind::FSub
-            | OpKind::FMul
-            | OpKind::FDiv
-            | OpKind::FCmp
-            | OpKind::GpioWrite
-            | OpKind::GpioSetMode
-            | OpKind::GpioWritePort
-            | OpKind::DacWrite
-            | OpKind::PwmSetDutyCycle
-            | OpKind::PwmSetFrequency
-            | OpKind::PwmSetPulseWidth
-            | OpKind::TimerSetPeriod
-            | OpKind::TimerSetCompare
-            | OpKind::UartWriteByte
-            | OpKind::UartWriteBuffer
-            | OpKind::UartReadBuffer
-            | OpKind::UartSetBaudRate
-            | OpKind::SpiTransfer
-            | OpKind::SpiTransferBuffer
-            | OpKind::SpiSetMode
-            | OpKind::SpiSetClock
-            | OpKind::SpiSetBitOrder
-            | OpKind::I2cWrite
-            | OpKind::I2cReadFrom
-            | OpKind::I2cSetClock
-            | OpKind::CanSend
-            | OpKind::CanSetFilter
-            | OpKind::CanSetBitrate
-            | OpKind::UsbWrite
-            | OpKind::DmaConfig
-            | OpKind::DmaSetSource
-            | OpKind::DmaSetDestination
-            | OpKind::EepromWrite
-            | OpKind::EepromUpdate
-            | OpKind::FlashWrite => 2,
+            // Modifiers
+            OpKind::Mode => "MODE",
+            OpKind::Frequency => "FREQUENCY",
+            OpKind::DutyCycle => "DUTY_CYCLE",
+            OpKind::PulseWidth => "PULSE_WIDTH",
+            OpKind::Period => "PERIOD",
+            OpKind::Compare => "COMPARE",
+            OpKind::BaudRate => "BAUD_RATE",
+            OpKind::Clock => "CLOCK",
+            OpKind::ClockSpeed => "CLOCK_SPEED",
+            OpKind::BitOrder => "BIT_ORDER",
+            OpKind::Filter => "FILTER",
+            OpKind::Bitrate => "BITRATE",
+            OpKind::Timeout => "TIMEOUT",
+            OpKind::Source => "SOURCE",
+            OpKind::Destination => "DESTINATION",
+            OpKind::Resolution => "RESOLUTION",
+            OpKind::Reference => "REFERENCE",
+            OpKind::PowerMode => "POWER_MODE",
+            OpKind::Time => "TIME",
+            OpKind::Alarm => "ALARM",
+            OpKind::Calendar => "CALENDAR",
+            OpKind::Millis => "MILLIS",
+            OpKind::Micros => "MICROS",
+            OpKind::Ms => "MS",
+            OpKind::Us => "US",
+            OpKind::Byte => "BYTE",
+            OpKind::Buffer => "BUFFER",
+            OpKind::Multi => "MULTI",
+            OpKind::Conversion => "CONVERSION",
+            OpKind::Transaction => "TRANSACTION",
+            OpKind::To => "TO",
+            OpKind::From => "FROM",
+            OpKind::Bit => "BIT",
+            OpKind::Ones => "ONES",
+            OpKind::Zeros => "ZEROS",
+            OpKind::First => "FIRST",
+            OpKind::Standby => "STANDBY",
+            OpKind::DeepSleep => "DEEP_SLEEP",
 
-            // Ternary
-            OpKind::I2cWriteTo => 3,
+            // Arithmetic
+            OpKind::Add => "ADD",
+            OpKind::Sub => "SUB",
+            OpKind::Mul => "MUL",
+            OpKind::Div => "DIV",
+            OpKind::Mod => "MOD",
+            OpKind::Inc => "INC",
+            OpKind::Dec => "DEC",
+            OpKind::Neg => "NEG",
+            OpKind::Abs => "ABS",
+
+            // Logical/Bitwise
+            OpKind::And => "AND",
+            OpKind::Or => "OR",
+            OpKind::Xor => "XOR",
+            OpKind::Not => "NOT",
+            OpKind::Shl => "SHL",
+            OpKind::Shr => "SHR",
+            OpKind::Sar => "SAR",
+            OpKind::Rol => "ROL",
+            OpKind::Ror => "ROR",
+
+            // Comparison
+            OpKind::Cmp => "CMP",
+            OpKind::Eq => "EQ",
+            OpKind::Ne => "NE",
+            OpKind::Lt => "LT",
+            OpKind::Le => "LE",
+            OpKind::Gt => "GT",
+            OpKind::Ge => "GE",
+
+            // Control flow
+            OpKind::Nop => "NOP",
+            OpKind::Halt => "HALT",
+            OpKind::Sleep => "SLEEP",
+
+            // Floating point
+            OpKind::FAdd => "FADD",
+            OpKind::FSub => "FSUB",
+            OpKind::FMul => "FMUL",
+            OpKind::FDiv => "FDIV",
+            OpKind::FSqrt => "FSQRT",
+            OpKind::FAbs => "FABS",
+            OpKind::FCmp => "FCMP",
         }
+    }
+
+    /// Check if this is an action (verb) segment.
+    pub fn is_action(self) -> bool {
+        matches!(
+            self,
+            OpKind::Read
+                | OpKind::Write
+                | OpKind::Init
+                | OpKind::Start
+                | OpKind::Stop
+                | OpKind::Reset
+                | OpKind::Toggle
+                | OpKind::Enable
+                | OpKind::Disable
+                | OpKind::Transfer
+                | OpKind::Send
+                | OpKind::Receive
+                | OpKind::Scan
+                | OpKind::Connect
+                | OpKind::Disconnect
+                | OpKind::Flush
+                | OpKind::Available
+                | OpKind::Erase
+                | OpKind::Update
+                | OpKind::Config
+                | OpKind::Enter
+                | OpKind::Get
+                | OpKind::Set
+                | OpKind::Begin
+                | OpKind::End
+                | OpKind::Find
+                | OpKind::Count
+                | OpKind::Clear
+                | OpKind::Test
+                | OpKind::Delay
+        )
+    }
+
+    /// Check if this is a target (peripheral) segment.
+    pub fn is_target(self) -> bool {
+        matches!(
+            self,
+            OpKind::Gpio
+                | OpKind::Port
+                | OpKind::Adc
+                | OpKind::Dac
+                | OpKind::Pwm
+                | OpKind::Timer
+                | OpKind::Uart
+                | OpKind::Spi
+                | OpKind::I2c
+                | OpKind::Can
+                | OpKind::Usb
+                | OpKind::Dma
+                | OpKind::Wdt
+                | OpKind::Eeprom
+                | OpKind::Flash
+                | OpKind::Rtc
+                | OpKind::Peripheral
+        )
+    }
+
+    /// Check if this is a primitive single-segment operation.
+    pub fn is_primitive(self) -> bool {
+        matches!(
+            self,
+            // Arithmetic
+            OpKind::Add
+                | OpKind::Sub
+                | OpKind::Mul
+                | OpKind::Div
+                | OpKind::Mod
+                | OpKind::Inc
+                | OpKind::Dec
+                | OpKind::Neg
+                | OpKind::Abs
+                // Logical/Bitwise
+                | OpKind::And
+                | OpKind::Or
+                | OpKind::Xor
+                | OpKind::Not
+                | OpKind::Shl
+                | OpKind::Shr
+                | OpKind::Sar
+                | OpKind::Rol
+                | OpKind::Ror
+                // Comparison
+                | OpKind::Cmp
+                | OpKind::Eq
+                | OpKind::Ne
+                | OpKind::Lt
+                | OpKind::Le
+                | OpKind::Gt
+                | OpKind::Ge
+                // Control flow
+                | OpKind::Nop
+                | OpKind::Halt
+                | OpKind::Sleep
+                // Floating point
+                | OpKind::FAdd
+                | OpKind::FSub
+                | OpKind::FMul
+                | OpKind::FDiv
+                | OpKind::FSqrt
+                | OpKind::FAbs
+                | OpKind::FCmp
+        )
     }
 }
