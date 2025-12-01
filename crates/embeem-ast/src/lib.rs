@@ -10,6 +10,11 @@
 //! identifiers (variables, functions, constants) must not use this pattern.
 //!
 //! See [`is_upper_snake_case`] and [`is_valid_user_identifier`] for validation functions.
+//!
+//! # Name Mangling
+//!
+//! The [`mangle`] module provides functions for converting Embeem names and operation
+//! paths into backend-specific identifiers using a length-prefixed encoding scheme.
 
 #![no_std]
 #![forbid(unsafe_code)]
@@ -19,6 +24,8 @@ extern crate alloc;
 
 #[cfg(feature = "alloc")]
 mod ast;
+#[cfg(feature = "alloc")]
+pub mod mangle;
 #[cfg(feature = "alloc")]
 mod ops;
 #[cfg(feature = "alloc")]

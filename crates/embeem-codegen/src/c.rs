@@ -1,34 +1,17 @@
 //! C code generator for Embeem.
 //!
-//! # Operation Mangling Scheme
+//! This module generates C code from Embeem AST. It uses the mangling scheme
+//! defined in `embeem_ast::mangle` for consistent name generation.
 //!
-//! Operations in Embeem are represented as paths of UPPER_SNAKE_CASE segments.
-//! During code generation, these paths are mangled into C function names using
-//! a length-prefixed encoding scheme:
-//!
-//! 1. Start with op_prefix (default: `embeem_op_`)
-//! 2. Append `$` and the number of path segments
-//! 3. For each segment: `_` + length + `_` + segment name
-//! 4. For hybrid operations: `_` + extern function name
-//!
-//! ## Examples
-//!
-//! | Embeem Syntax | Path | Mangled Name |
-//! |---------------|------|--------------|
-//! | `FSUB(a, b)` | `["FSUB"]` | `embeem_op_$1_4_FSUB` |
-//! | `GPIO_READ(pin)` | `["GPIO_READ"]` | `embeem_op_$1_9_GPIO_READ` |
-//! | `WRITE(GPIO(pin), val)` | `["WRITE", "GPIO"]` | `embeem_op_$2_5_WRITE_4_GPIO` |
-//! | `READ(ADC(ch))` | `["READ", "ADC"]` | `embeem_op_$2_4_READ_3_ADC` |
-//! | `A(B(C(x)))` | `["A", "B", "C"]` | `embeem_op_$3_1_A_1_B_1_C` |
-//! | `WRITE(GPIO(sensor_read(x)))` | `["WRITE", "GPIO"]` + extern `sensor_read` | `embeem_op_$2_5_WRITE_4_GPIO_sensor_read` |
-//!
-//! This scheme is unambiguous and allows the original path to be decoded.
+//! See the [`embeem_ast::mangle`] module documentation for details on the
+//! operation mangling scheme.
 
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use embeem_ast::{
+    mangle::{mangle_extern_function_name, mangle_function_name, mangle_operation_path, MangleConfig},
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal,
     PrimitiveType, Program, RangeDirection, Statement, Type, TypeContext, UnaryOp,
     infer_expression_type,
@@ -50,37 +33,26 @@ impl CodegenError {
 
 /// Options for C code generation.
 #[derive(Clone, Debug)]
-pub struct CodegenOptions {
+pub struct CCodegenOptions {
     /// Use GCC statement expressions `({ ... })` for block expressions and complex if expressions.
     /// This is a GCC extension that allows embedding statements inside expressions.
     /// When enabled, complex control flow can be inlined as expressions.
     /// When disabled, such constructs may produce errors or require restructuring.
     pub use_gcc_statement_exprs: bool,
-    /// Prefix for mangled function names to avoid symbol collisions.
-    /// Default is "embeem_".
-    pub mangle_prefix: String,
-    /// Prefix for non-hybrid operation function names.
-    /// This is prepended before the length-prefixed encoding.
-    /// Default is "embeem_op_".
-    pub op_prefix: String,
-    /// Prefix for external functions and hybrid operations.
-    /// Used for direct external function calls and operation paths that end with an extern fn.
-    /// Default is "embeem_extern_".
-    pub extern_prefix: String,
+    /// Mangling configuration for function and operation names.
+    pub mangle_config: MangleConfig,
 }
 
-impl Default for CodegenOptions {
+impl Default for CCodegenOptions {
     fn default() -> Self {
         Self {
             use_gcc_statement_exprs: false,
-            mangle_prefix: "embeem_".to_string(),
-            op_prefix: "embeem_op_".to_string(),
-            extern_prefix: "embeem_extern_".to_string(),
+            mangle_config: MangleConfig::default(),
         }
     }
 }
 
-impl CodegenOptions {
+impl CCodegenOptions {
     /// Create default options (standard C, no extensions).
     pub fn new() -> Self {
         Self::default()
@@ -92,21 +64,27 @@ impl CodegenOptions {
         self
     }
 
+    /// Set the mangling configuration.
+    pub fn with_mangle_config(mut self, config: MangleConfig) -> Self {
+        self.mangle_config = config;
+        self
+    }
+
     /// Set the function name mangling prefix.
     pub fn with_mangle_prefix(mut self, prefix: &str) -> Self {
-        self.mangle_prefix = prefix.to_string();
+        self.mangle_config.fn_prefix = prefix.to_string();
         self
     }
 
     /// Set the operation function prefix.
     pub fn with_op_prefix(mut self, prefix: &str) -> Self {
-        self.op_prefix = prefix.to_string();
+        self.mangle_config.op_prefix = prefix.to_string();
         self
     }
 
     /// Set the external function and hybrid operation prefix.
     pub fn with_extern_prefix(mut self, prefix: &str) -> Self {
-        self.extern_prefix = prefix.to_string();
+        self.mangle_config.extern_prefix = prefix.to_string();
         self
     }
 }
@@ -116,18 +94,18 @@ pub struct CCodegen {
     output: String,
     indent: usize,
     temp_counter: usize,
-    options: CodegenOptions,
+    options: CCodegenOptions,
     type_ctx: TypeContext,
 }
 
 impl CCodegen {
     /// Create a new code generator with default options.
     pub fn new() -> Self {
-        Self::with_options(CodegenOptions::default())
+        Self::with_options(CCodegenOptions::default())
     }
 
     /// Create a new code generator with the specified options.
-    pub fn with_options(options: CodegenOptions) -> Self {
+    pub fn with_options(options: CCodegenOptions) -> Self {
         Self {
             output: String::new(),
             indent: 0,
@@ -203,11 +181,6 @@ impl CCodegen {
         self.emit_line("");
     }
 
-    /// Mangle a function name to avoid symbol collisions.
-    fn mangle_name(&self, name: &str) -> String {
-        format!("{}{}", self.options.mangle_prefix, name)
-    }
-
     fn emit_const(&mut self, constant: &ConstDecl) -> Result<(), CodegenError> {
         let _c_type = self.type_to_c(&constant.ty);
         let value = self.expr_to_c(&constant.value)?;
@@ -240,7 +213,7 @@ impl CCodegen {
         };
 
         // External functions are mangled with extern_prefix
-        let mangled_name = format!("{}{}", self.options.extern_prefix, extern_fn.name);
+        let mangled_name = mangle_extern_function_name(&extern_fn.name, &self.options.mangle_config);
         self.emit_line(&format!("extern {} {}({});", return_type, mangled_name, params));
         Ok(())
     }
@@ -264,7 +237,7 @@ impl CCodegen {
             params
         };
 
-        let mangled_name = self.mangle_name(&function.name);
+        let mangled_name = mangle_function_name(&function.name, &self.options.mangle_config);
         self.emit_line(&format!("{} {}({});", return_type, mangled_name, params));
         Ok(())
     }
@@ -294,7 +267,7 @@ impl CCodegen {
             params
         };
 
-        let mangled_name = self.mangle_name(&function.name);
+        let mangled_name = mangle_function_name(&function.name, &self.options.mangle_config);
         self.emit_line(&format!("{} {}({}) {{", return_type, mangled_name, params));
         self.indent += 1;
 
@@ -541,9 +514,9 @@ impl CCodegen {
                 // External functions use extern_prefix
                 // Regular functions get the mangle prefix
                 let name = if self.type_ctx.is_extern_fn(function) {
-                    format!("{}{}", self.options.extern_prefix, function)
+                    mangle_extern_function_name(function, &self.options.mangle_config)
                 } else {
-                    self.mangle_name(function)
+                    mangle_function_name(function, &self.options.mangle_config)
                 };
                 Ok(format!("{}({})", name, arg_strs.join(", ")))
             }
@@ -627,47 +600,8 @@ impl CCodegen {
         }
 
         // For all operations (including hybrid), use the mangled function name
-        let op_name = self.mangle_operation_path(path, extern_fn);
+        let op_name = mangle_operation_path(path, extern_fn, &self.options.mangle_config);
         Ok(format!("{}({})", op_name, arg_strs.join(", ")))
-    }
-
-    /// Mangle an operation path into a C function name using length-prefixed encoding.
-    ///
-    /// The mangling scheme uses different prefixes based on operation type:
-    /// - Non-hybrid operations (pure operation paths): `op_prefix` (default: `embeem_op_`)
-    /// - Hybrid operations (path + extern fn): `extern_prefix` (default: `embeem_extern_`)
-    ///
-    /// Format:
-    /// 1. Start with appropriate prefix
-    /// 2. Append `$` and number of path segments
-    /// 3. For each segment: `_` + length + `_` + segment name
-    /// 4. For hybrid operations: `_` + extern function name
-    ///
-    /// Examples (with default prefixes):
-    /// - `["FSUB"]` -> `embeem_op_$1_4_FSUB`
-    /// - `["WRITE", "GPIO"]` -> `embeem_op_$2_5_WRITE_4_GPIO`
-    /// - `["READ", "ADC"]` -> `embeem_op_$2_4_READ_3_ADC`
-    /// - `["WRITE", "GPIO"]` with extern_fn `sensor_read` -> `embeem_extern_$2_5_WRITE_4_GPIO_sensor_read`
-    ///
-    /// This scheme is unambiguous and allows decoding the original path.
-    fn mangle_operation_path(&self, path: &[String], extern_fn: Option<&str>) -> String {
-        // Choose prefix based on whether this is a hybrid operation
-        let prefix = if extern_fn.is_some() {
-            &self.options.extern_prefix
-        } else {
-            &self.options.op_prefix
-        };
-        
-        let mut result = format!("{}${}", prefix, path.len());
-        for segment in path {
-            result.push_str(&format!("_{}_", segment.len()));
-            result.push_str(segment);
-        }
-        if let Some(fn_name) = extern_fn {
-            result.push('_');
-            result.push_str(fn_name);
-        }
-        result
     }
 
     /// Emit a block expression using GCC statement expression syntax: `({ ... })`
@@ -964,7 +898,7 @@ pub fn compile_to_c(program: &Program) -> Result<String, CodegenError> {
 }
 
 /// Convenience function to compile an Embeem program to C with specified options.
-pub fn compile_to_c_with_options(program: &Program, options: CodegenOptions) -> Result<String, CodegenError> {
+pub fn compile_to_c_with_options(program: &Program, options: CCodegenOptions) -> Result<String, CodegenError> {
     let mut codegen = CCodegen::with_options(options);
     codegen.generate(program)
 }
@@ -972,7 +906,7 @@ pub fn compile_to_c_with_options(program: &Program, options: CodegenOptions) -> 
 /// Convenience function to compile an Embeem program to C using GCC extensions.
 /// This enables GCC statement expressions `({ ... })` for block and complex if expressions.
 pub fn compile_to_c_gcc(program: &Program) -> Result<String, CodegenError> {
-    let options = CodegenOptions::new().with_gcc_extensions();
+    let options = CCodegenOptions::new().with_gcc_extensions();
     let mut codegen = CCodegen::with_options(options);
     codegen.generate(program)
 }
