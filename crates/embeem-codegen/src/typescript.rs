@@ -15,9 +15,28 @@ use embeem_ast::{
     BinaryOp, Block, ConstDecl, ElseBlock, Expression, ExternFn, Function, Literal,
     PrimitiveType, Program, RangeDirection, Statement, Type, TypeContext, UnaryOp,
     infer_expression_type,
+    // Module types
+    Module, Item, Import, ModulePath,
 };
 
 use crate::c::CodegenError;
+
+/// Output mode for TypeScript generation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TsOutputMode {
+    /// Flatten all modules into a single file (default).
+    /// Uses mangled names for all non-root module items.
+    Flattened,
+    /// Generate native ESM modules.
+    /// Preserves import/export statements, uses .js extension for imports.
+    Esm,
+}
+
+impl Default for TsOutputMode {
+    fn default() -> Self {
+        Self::Flattened
+    }
+}
 
 /// Options for TypeScript code generation.
 #[derive(Clone, Debug)]
@@ -30,6 +49,10 @@ pub struct TsCodegenOptions {
     pub use_const: bool,
     /// Module name to import external functions from (default: "./extern").
     pub extern_module: String,
+    /// Output mode: Flattened or ESM (default: Flattened).
+    pub output_mode: TsOutputMode,
+    /// File extension for ESM imports (default: ".js").
+    pub esm_extension: String,
 }
 
 impl Default for TsCodegenOptions {
@@ -39,6 +62,8 @@ impl Default for TsCodegenOptions {
             emit_types: true,
             use_const: true,
             extern_module: "./extern".to_string(),
+            output_mode: TsOutputMode::default(),
+            esm_extension: ".js".to_string(),
         }
     }
 }
@@ -70,6 +95,24 @@ impl TsCodegenOptions {
     /// Set the module name to import external functions from.
     pub fn with_extern_module(mut self, module: &str) -> Self {
         self.extern_module = module.to_string();
+        self
+    }
+
+    /// Set the output mode (Flattened or ESM).
+    pub fn with_output_mode(mut self, mode: TsOutputMode) -> Self {
+        self.output_mode = mode;
+        self
+    }
+
+    /// Enable ESM output mode.
+    pub fn with_esm(mut self) -> Self {
+        self.output_mode = TsOutputMode::Esm;
+        self
+    }
+
+    /// Set the file extension for ESM imports.
+    pub fn with_esm_extension(mut self, ext: &str) -> Self {
+        self.esm_extension = ext.to_string();
         self
     }
 }
@@ -130,6 +173,263 @@ impl TsCodegen {
         }
 
         Ok(self.output.clone())
+    }
+
+    /// Generate TypeScript code from an Embeem module using native ESM.
+    ///
+    /// This generates a single ESM module file with proper import/export statements.
+    /// Unlike `generate`, this preserves the module structure rather than flattening.
+    ///
+    /// # Arguments
+    /// * `module` - The parsed module AST
+    /// * `_module_path` - The path segments for this module (reserved for future use)
+    pub fn generate_module(&mut self, module: &Module, _module_path: &[String]) -> Result<String, CodegenError> {
+        self.output.clear();
+        self.type_ctx = self.type_ctx_from_module(module);
+        self.temp_counter = 0;
+
+        // Generate header
+        self.emit_esm_header();
+
+        // Generate imports
+        for import in &module.imports {
+            self.emit_esm_import(import)?;
+        }
+        if !module.imports.is_empty() {
+            self.emit_line("");
+        }
+
+        // Collect items by type
+        let mut constants = Vec::new();
+        let mut extern_fns = Vec::new();
+        let mut functions = Vec::new();
+
+        for item in &module.items {
+            match &item.item {
+                Item::Const(c) => constants.push((item.exported, c)),
+                Item::ExternFn(e) => extern_fns.push((item.exported, e)),
+                Item::Function(f) => functions.push((item.exported, f)),
+            }
+        }
+
+        // Generate constants
+        for (exported, constant) in &constants {
+            self.emit_esm_const(constant, *exported)?;
+        }
+        if !constants.is_empty() {
+            self.emit_line("");
+        }
+
+        // Generate extern function declarations/imports
+        if !extern_fns.is_empty() {
+            self.emit_esm_extern_fns(&extern_fns)?;
+            self.emit_line("");
+        }
+
+        // Generate function definitions
+        for (exported, function) in &functions {
+            self.emit_esm_function(function, *exported)?;
+            self.emit_line("");
+        }
+
+        Ok(self.output.clone())
+    }
+
+    /// Build a TypeContext from a Module.
+    fn type_ctx_from_module(&self, module: &Module) -> TypeContext {
+        let mut ctx = TypeContext::new();
+
+        for item in &module.items {
+            match &item.item {
+                Item::Const(c) => {
+                    ctx.add_constant(c.name.clone(), c.ty.clone());
+                }
+                Item::ExternFn(e) => {
+                    ctx.add_extern_fn(e.name.clone(), e.return_type.clone());
+                }
+                Item::Function(f) => {
+                    ctx.add_function(f.name.clone(), f.return_type.clone());
+                }
+            }
+        }
+
+        ctx
+    }
+
+    fn emit_esm_header(&mut self) {
+        self.emit_line("// Generated by Embeem compiler");
+        self.emit_line("// TypeScript ESM output");
+        self.emit_line("");
+    }
+
+    /// Convert a ModulePath to an ESM import path string.
+    fn module_path_to_esm(&self, path: &ModulePath) -> String {
+        let mut result = String::new();
+
+        if path.is_relative {
+            if path.parent_count > 0 {
+                for _ in 0..path.parent_count {
+                    result.push_str("../");
+                }
+            } else {
+                result.push_str("./");
+            }
+        }
+
+        result.push_str(&path.segments.join("/"));
+        result.push_str(&self.options.esm_extension);
+        result
+    }
+
+    /// Emit an ESM import statement.
+    fn emit_esm_import(&mut self, import: &Import) -> Result<(), CodegenError> {
+        match import {
+            Import::Named { items, path } => {
+                let imports: Vec<String> = items
+                    .iter()
+                    .map(|spec| {
+                        if let Some(alias) = &spec.alias {
+                            format!("{} as {}", spec.name, alias)
+                        } else {
+                            spec.name.clone()
+                        }
+                    })
+                    .collect();
+
+                self.emit_line(&format!(
+                    "import {{ {} }} from \"{}\";",
+                    imports.join(", "),
+                    self.module_path_to_esm(path)
+                ));
+            }
+            Import::Namespace { alias, path } => {
+                self.emit_line(&format!(
+                    "import * as {} from \"{}\";",
+                    alias,
+                    self.module_path_to_esm(path)
+                ));
+            }
+            Import::SideEffect { path } => {
+                self.emit_line(&format!(
+                    "import \"{}\";",
+                    self.module_path_to_esm(path)
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Emit a constant with optional export.
+    fn emit_esm_const(&mut self, constant: &ConstDecl, exported: bool) -> Result<(), CodegenError> {
+        let value = self.expr_to_ts(&constant.value)?;
+        let export_kw = if exported { "export " } else { "" };
+
+        if self.options.emit_types {
+            let ts_type = self.type_to_ts(&constant.ty);
+            self.emit_line(&format!("{}const {}: {} = {};", export_kw, constant.name, ts_type, value));
+        } else {
+            self.emit_line(&format!("{}const {} = {};", export_kw, constant.name, value));
+        }
+        Ok(())
+    }
+
+    /// Emit extern function declarations.
+    /// In ESM mode, these become imports from the extern module.
+    fn emit_esm_extern_fns(&mut self, extern_fns: &[(bool, &ExternFn)]) -> Result<(), CodegenError> {
+        if extern_fns.is_empty() {
+            return Ok(());
+        }
+
+        // In ESM mode, we import extern functions from the extern module
+        let names: Vec<String> = extern_fns
+            .iter()
+            .map(|(_, ef)| ef.name.clone())
+            .collect();
+
+        if self.options.emit_types {
+            self.emit_line("// External function types:");
+            for (_, extern_fn) in extern_fns {
+                let params = extern_fn
+                    .params
+                    .iter()
+                    .map(|p| format!("{}: {}", p.name, self.type_to_ts(&p.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let return_type = match &extern_fn.return_type {
+                    Some(ty) => self.type_to_ts(ty),
+                    None => "void".to_string(),
+                };
+                self.emit_line(&format!("//   {}({}): {}", extern_fn.name, params, return_type));
+            }
+        }
+
+        // Emit the import statement
+        self.emit_line(&format!(
+            "import {{ {} }} from \"{}\";",
+            names.join(", "),
+            self.options.extern_module
+        ));
+
+        // Re-export if any are exported from this module
+        let exported_names: Vec<String> = extern_fns
+            .iter()
+            .filter(|(exported, _)| *exported)
+            .map(|(_, ef)| ef.name.clone())
+            .collect();
+
+        if !exported_names.is_empty() {
+            self.emit_line(&format!("export {{ {} }};", exported_names.join(", ")));
+        }
+
+        Ok(())
+    }
+
+    /// Emit a function definition with optional export.
+    fn emit_esm_function(&mut self, function: &Function, exported: bool) -> Result<(), CodegenError> {
+        // Save the current type context and add function parameters
+        let saved_ctx = self.type_ctx.clone();
+        for param in &function.params {
+            self.type_ctx.add_variable(param.name.clone(), param.ty.clone());
+        }
+
+        let export_kw = if exported { "export " } else { "" };
+
+        if self.options.emit_types {
+            let params = function
+                .params
+                .iter()
+                .map(|p| format!("{}: {}", p.name, self.type_to_ts(&p.ty)))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            let return_type = match &function.return_type {
+                Some(ty) => self.type_to_ts(ty),
+                None => "void".to_string(),
+            };
+
+            self.emit_line(&format!(
+                "{}function {}({}): {} {{",
+                export_kw, function.name, params, return_type
+            ));
+        } else {
+            let params = function
+                .params
+                .iter()
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            self.emit_line(&format!("{}function {}({}) {{", export_kw, function.name, params));
+        }
+
+        self.indent += 1;
+        self.emit_block(&function.body, function.return_type.is_some())?;
+        self.indent -= 1;
+        self.emit_line("}");
+
+        // Restore the type context
+        self.type_ctx = saved_ctx;
+        Ok(())
     }
 
     fn emit_header(&mut self) {
@@ -1056,5 +1356,186 @@ mod tests {
         let ts_code = compile_to_ts(&program).unwrap();
         // TypeScript should use strict equality ===
         assert!(ts_code.contains("==="), "Expected strict equality ===, got:\n{}", ts_code);
+    }
+
+    #[test]
+    fn test_esm_module_basic() {
+        use std::vec;
+        use std::boxed::Box;
+        use embeem_ast::{Module, ModuleItem, Item, Function, Block, PrimitiveType, Type, Expression, Literal};
+        
+        let module = Module {
+            imports: vec![],
+            items: vec![
+                ModuleItem {
+                    exported: true,
+                    item: Item::Function(Function {
+                        name: "greet".to_string(),
+                        params: vec![],
+                        return_type: Some(Type::Primitive(PrimitiveType::U32)),
+                        body: Block {
+                            statements: vec![],
+                            result: Some(Box::new(Expression::Literal(Literal::Integer(42)))),
+                        },
+                    }),
+                },
+                ModuleItem {
+                    exported: false,
+                    item: Item::Function(Function {
+                        name: "helper".to_string(),
+                        params: vec![],
+                        return_type: None,
+                        body: Block { statements: vec![], result: None },
+                    }),
+                },
+            ],
+        };
+
+        let mut codegen = TsCodegen::with_options(
+            TsCodegenOptions::new().with_esm()
+        );
+        let ts_code = codegen.generate_module(&module, &[]).unwrap();
+
+        // Exported function should have `export` keyword
+        assert!(ts_code.contains("export function greet"), "Expected exported function, got:\n{}", ts_code);
+        // Non-exported function should NOT have `export` keyword
+        assert!(ts_code.contains("function helper"), "Expected non-exported function, got:\n{}", ts_code);
+        assert!(!ts_code.contains("export function helper"), "helper should not be exported");
+    }
+
+    #[test]
+    fn test_esm_imports() {
+        use std::vec;
+        use embeem_ast::{Module, ModuleItem, Item, Function, Block, Import, ImportSpec, ModulePath};
+        
+        let module = Module {
+            imports: vec![
+                Import::Named {
+                    items: vec![
+                        ImportSpec { name: "foo".to_string(), alias: None },
+                        ImportSpec { name: "bar".to_string(), alias: Some("baz".to_string()) },
+                    ],
+                    path: ModulePath::relative(vec!["utils".to_string()]),
+                },
+                Import::Namespace {
+                    alias: "gpio".to_string(),
+                    path: ModulePath::relative(vec!["drivers".to_string(), "gpio".to_string()]),
+                },
+            ],
+            items: vec![
+                ModuleItem {
+                    exported: true,
+                    item: Item::Function(Function {
+                        name: "main".to_string(),
+                        params: vec![],
+                        return_type: None,
+                        body: Block { statements: vec![], result: None },
+                    }),
+                },
+            ],
+        };
+
+        let mut codegen = TsCodegen::with_options(
+            TsCodegenOptions::new().with_esm()
+        );
+        let ts_code = codegen.generate_module(&module, &[]).unwrap();
+
+        // Check named import
+        assert!(ts_code.contains("import { foo, bar as baz } from \"./utils.js\";"), 
+            "Expected named import, got:\n{}", ts_code);
+        // Check namespace import  
+        assert!(ts_code.contains("import * as gpio from \"./drivers/gpio.js\";"),
+            "Expected namespace import, got:\n{}", ts_code);
+    }
+
+    #[test]
+    fn test_esm_parent_path() {
+        use std::vec;
+        use embeem_ast::{Module, Import, ImportSpec, ModulePath};
+        
+        let module = Module {
+            imports: vec![
+                Import::Named {
+                    items: vec![ImportSpec { name: "util".to_string(), alias: None }],
+                    path: ModulePath::relative(vec!["common".to_string()]).with_parent_count(2),
+                },
+            ],
+            items: vec![],
+        };
+
+        let mut codegen = TsCodegen::with_options(
+            TsCodegenOptions::new().with_esm()
+        );
+        let ts_code = codegen.generate_module(&module, &[]).unwrap();
+
+        // Check parent path resolution
+        assert!(ts_code.contains("import { util } from \"../../common.js\";"), 
+            "Expected parent path import, got:\n{}", ts_code);
+    }
+
+    #[test]
+    fn test_esm_constants() {
+        use std::vec;
+        use embeem_ast::{Module, ModuleItem, Item, ConstDecl, PrimitiveType, Type, Expression, Literal};
+        
+        let module = Module {
+            imports: vec![],
+            items: vec![
+                ModuleItem {
+                    exported: true,
+                    item: Item::Const(ConstDecl {
+                        name: "LED_PIN".to_string(),
+                        ty: Type::Primitive(PrimitiveType::U8),
+                        value: Expression::Literal(Literal::Integer(13)),
+                    }),
+                },
+                ModuleItem {
+                    exported: false,
+                    item: Item::Const(ConstDecl {
+                        name: "INTERNAL".to_string(),
+                        ty: Type::Primitive(PrimitiveType::U32),
+                        value: Expression::Literal(Literal::Integer(100)),
+                    }),
+                },
+            ],
+        };
+
+        let mut codegen = TsCodegen::with_options(
+            TsCodegenOptions::new().with_esm()
+        );
+        let ts_code = codegen.generate_module(&module, &[]).unwrap();
+
+        assert!(ts_code.contains("export const LED_PIN: number = 13;"), 
+            "Expected exported constant, got:\n{}", ts_code);
+        assert!(ts_code.contains("const INTERNAL: number = 100;"), 
+            "Expected non-exported constant, got:\n{}", ts_code);
+        assert!(!ts_code.contains("export const INTERNAL"), 
+            "INTERNAL should not be exported");
+    }
+
+    #[test]
+    fn test_esm_custom_extension() {
+        use std::vec;
+        use embeem_ast::{Module, Import, ImportSpec, ModulePath};
+        
+        let module = Module {
+            imports: vec![
+                Import::Named {
+                    items: vec![ImportSpec { name: "foo".to_string(), alias: None }],
+                    path: ModulePath::relative(vec!["utils".to_string()]),
+                },
+            ],
+            items: vec![],
+        };
+
+        let mut codegen = TsCodegen::with_options(
+            TsCodegenOptions::new()
+                .with_esm()
+                .with_esm_extension(".ts")
+        );
+        let ts_code = codegen.generate_module(&module, &[]).unwrap();
+
+        assert!(ts_code.contains("from \"./utils.ts\";"), 
+            "Expected .ts extension, got:\n{}", ts_code);
     }
 }
