@@ -542,12 +542,27 @@ Common targets include: `GPIO`, `ADC`, `DAC`, `PWM`, `TIMER`, `UART`, `SPI`, `I2
 
 #### 7.14.5 Code Generation and Mangling
 
-Operation paths are mangled into C function names using **length-prefixed encoding**:
+Operation paths are mangled into C function names using **length-prefixed encoding** with distinct prefixes for different operation types:
 
-1. Start with op_prefix (default: `embeem_op_`)
-2. Append `$` and the number of path segments
-3. For each segment: `_` + length + `_` + segment name (preserving case)
-4. For hybrid operations: `_` + extern function name
+**Prefix Types:**
+- **op_prefix** (default: `embeem_op_`): For non-hybrid operations (pure operation paths)
+- **extern_prefix** (default: `embeem_extern_`): For external function calls and hybrid operations (operation path + extern fn)
+
+**Mangling Format:**
+1. Start with the appropriate prefix (`op_prefix` for non-hybrid, `extern_prefix` for extern fns and hybrid)
+2. For external functions: just append the function name
+3. For operations: append `$` and the number of path segments
+4. For each segment: `_` + length + `_` + segment name (preserving case)
+5. For hybrid operations only: `_` + extern function name
+
+**External Function Calls (using extern_prefix):**
+
+| Source | Mangled C Function |
+|--------|-------------------|
+| `sensor_read(0)` | `embeem_extern_sensor_read(0)` |
+| `init_hardware()` | `embeem_extern_init_hardware()` |
+
+**Non-Hybrid Operations (using op_prefix):**
 
 | Path | Mangled C Function |
 |------|-------------------|
@@ -588,19 +603,21 @@ When parsing an operation call, if a segment is *not* `UPPER_SNAKE_CASE` but is 
 
 ##### Code Generation
 
-For hybrid operations, the extern function name is appended to the mangled operation name. This produces a single identifier that the environment can resolve.
+For hybrid operations, the **extern_prefix** (default: `embeem_extern_`) is used instead of the `op_prefix`. The extern function name is appended to the mangled operation name, producing a single identifier that the environment can resolve.
 
 | Source | Mangled C Function |
 |--------|-------------------|
-| `WRITE(GPIO(sensor_read(0)))` | `embeem_op_$2_5_WRITE_4_GPIO_sensor_read(0)` |
-| `PROCESS(DATA(get_value(x, y)), z)` | `embeem_op_$2_7_PROCESS_4_DATA_get_value(x, y, z)` |
-| `SEND(UART(format_msg(buf)))` | `embeem_op_$2_4_SEND_4_UART_format_msg(buf)` |
+| `WRITE(GPIO(sensor_read(0)))` | `embeem_extern_$2_5_WRITE_4_GPIO_sensor_read(0)` |
+| `PROCESS(DATA(get_value(x, y)), z)` | `embeem_extern_$2_7_PROCESS_4_DATA_get_value(x, y, z)` |
+| `SEND(UART(format_msg(buf)))` | `embeem_extern_$2_4_SEND_4_UART_format_msg(buf)` |
 
 The mangling scheme for hybrid operations:
-1. Mangle the path as normal (length-prefixed segments)
-2. Append `_` and the extern function name unchanged
+1. Start with `extern_prefix`
+2. Mangle the path as normal (length-prefixed segments)
+3. Append `_` and the extern function name unchanged
 
 This allows the environment to:
+- Easily distinguish external/hybrid operations from pure operations by prefix
 - Provide specific implementations for each operation+extern combination
 - Use C macros to dispatch based on the extern fn portion
 - Generate platform-specific code at link time
@@ -619,21 +636,21 @@ The runtime provides implementations for hybrid operation functions:
 
 ```c
 // Implementation for WRITE(GPIO(sensor_read(channel)))
-// Called as: embeem_op_$2_5_WRITE_4_GPIO_sensor_read(channel)
-void embeem_op_$2_5_WRITE_4_GPIO_sensor_read(uint8_t channel) {
-    uint16_t value = sensor_read(channel);
+// Called as: embeem_extern_$2_5_WRITE_4_GPIO_sensor_read(channel)
+void embeem_extern_$2_5_WRITE_4_GPIO_sensor_read(uint8_t channel) {
+    uint16_t value = embeem_extern_sensor_read(channel);
     // write value to GPIO
 }
 
 // Or use a macro to generate implementations:
-#define HYBRID_WRITE_GPIO(fn) \
-    void embeem_op_$2_5_WRITE_4_GPIO_##fn(uint8_t arg) { \
-        uint16_t value = fn(arg); \
+#define EXTERN_WRITE_GPIO(fn) \
+    void embeem_extern_$2_5_WRITE_4_GPIO_##fn(uint8_t arg) { \
+        uint16_t value = embeem_extern_##fn(arg); \
         digitalWrite(value); \
     }
 
-HYBRID_WRITE_GPIO(sensor_read)
-HYBRID_WRITE_GPIO(temp_read)
+EXTERN_WRITE_GPIO(sensor_read)
+EXTERN_WRITE_GPIO(temp_read)
 ```
 
 #### 7.14.7 Implementation Notes
@@ -740,12 +757,12 @@ See [TOTALITY.md](../doc/TOTALITY.md) for formal proofs.
 
 #### 8.3.2 Code Generation
 
-External functions are emitted as `extern` declarations in C and are called with their declared name (no mangling):
+External functions are emitted as `extern` declarations in C with the `extern_prefix` (default: `embeem_extern_`):
 
 ```c
-extern int32_t get_sensor_value(uint8_t channel);
-extern void set_led(uint8_t pin, bool value);
-extern void init_hardware(void);
+extern int32_t embeem_extern_get_sensor_value(uint8_t channel);
+extern void embeem_extern_set_led(uint8_t pin, bool value);
+extern void embeem_extern_init_hardware(void);
 ```
 
 ### 8.4 Constants

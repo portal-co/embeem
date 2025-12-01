@@ -213,15 +213,20 @@
         }
       ],
       "manglingScheme": {
-        "description": "Operation paths are mangled using length-prefixed encoding: <op_prefix>$<n>_<len>_<SEG>... For hybrid operations, append _ and the extern fn name.",
-        "format": "<op_prefix>$<segment_count>_<len1>_<SEG1>_<len2>_<SEG2>...[_<externFn>]",
+        "description": "Operation paths are mangled using length-prefixed encoding with distinct prefixes. Non-hybrid operations use op_prefix (default: embeem_op_). External functions and hybrid operations (with externFn) use extern_prefix (default: embeem_extern_).",
+        "format": "<prefix>$<segment_count>_<len1>_<SEG1>_<len2>_<SEG2>...[_<externFn>]",
+        "prefixes": {
+          "op_prefix": { "default": "embeem_op_", "description": "Prefix for non-hybrid operations" },
+          "extern_prefix": { "default": "embeem_extern_", "description": "Prefix for external function calls and hybrid operations" }
+        },
         "examples": [
-          { "path": ["FSUB"], "mangledName": "embeem_op_$1_4_FSUB" },
-          { "path": ["GPIO_READ"], "mangledName": "embeem_op_$1_9_GPIO_READ" },
-          { "path": ["READ", "GPIO"], "mangledName": "embeem_op_$2_4_READ_4_GPIO" },
-          { "path": ["WRITE", "GPIO"], "mangledName": "embeem_op_$2_5_WRITE_4_GPIO" },
-          { "path": ["SET_FREQUENCY", "PWM"], "mangledName": "embeem_op_$2_13_SET_FREQUENCY_3_PWM" },
-          { "path": ["WRITE", "GPIO"], "externFn": "sensor_read", "mangledName": "embeem_op_$2_5_WRITE_4_GPIO_sensor_read" }
+          { "externFn": "sensor_read", "mangledName": "embeem_extern_sensor_read", "_comment": "direct external function call" },
+          { "path": ["FSUB"], "mangledName": "embeem_op_$1_4_FSUB", "_comment": "non-hybrid operation" },
+          { "path": ["GPIO_READ"], "mangledName": "embeem_op_$1_9_GPIO_READ", "_comment": "non-hybrid operation" },
+          { "path": ["READ", "GPIO"], "mangledName": "embeem_op_$2_4_READ_4_GPIO", "_comment": "non-hybrid operation" },
+          { "path": ["WRITE", "GPIO"], "mangledName": "embeem_op_$2_5_WRITE_4_GPIO", "_comment": "non-hybrid operation" },
+          { "path": ["SET_FREQUENCY", "PWM"], "mangledName": "embeem_op_$2_13_SET_FREQUENCY_3_PWM", "_comment": "non-hybrid operation" },
+          { "path": ["WRITE", "GPIO"], "externFn": "sensor_read", "mangledName": "embeem_extern_$2_5_WRITE_4_GPIO_sensor_read", "_comment": "hybrid operation - uses extern_prefix" }
         ],
         "note": "Single-segment paths for built-in C operators (ADD, SUB, MUL, etc.) may be inlined directly as C operators rather than function calls"
       }

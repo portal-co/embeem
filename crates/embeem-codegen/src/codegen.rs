@@ -59,10 +59,14 @@ pub struct CodegenOptions {
     /// Prefix for mangled function names to avoid symbol collisions.
     /// Default is "embeem_".
     pub mangle_prefix: String,
-    /// Prefix for operation function names.
+    /// Prefix for non-hybrid operation function names.
     /// This is prepended before the length-prefixed encoding.
     /// Default is "embeem_op_".
     pub op_prefix: String,
+    /// Prefix for external functions and hybrid operations.
+    /// Used for direct external function calls and operation paths that end with an extern fn.
+    /// Default is "embeem_extern_".
+    pub extern_prefix: String,
 }
 
 impl Default for CodegenOptions {
@@ -71,6 +75,7 @@ impl Default for CodegenOptions {
             use_gcc_statement_exprs: false,
             mangle_prefix: "embeem_".to_string(),
             op_prefix: "embeem_op_".to_string(),
+            extern_prefix: "embeem_extern_".to_string(),
         }
     }
 }
@@ -96,6 +101,12 @@ impl CodegenOptions {
     /// Set the operation function prefix.
     pub fn with_op_prefix(mut self, prefix: &str) -> Self {
         self.op_prefix = prefix.to_string();
+        self
+    }
+
+    /// Set the external function and hybrid operation prefix.
+    pub fn with_extern_prefix(mut self, prefix: &str) -> Self {
+        self.extern_prefix = prefix.to_string();
         self
     }
 }
@@ -180,11 +191,12 @@ impl CCodegen {
 
         self.emit_line("/* Operation Mangling Scheme */");
         self.emit_line("/* Operations use length-prefixed encoding: <prefix>$<n>_<len>_<SEG>... */");
-        self.emit_line("/* Examples: */");
+        self.emit_line("/* Non-hybrid operations use op_prefix (default: embeem_op_): */");
         self.emit_line("/*   FSUB(a, b)           -> embeem_op_$1_4_FSUB(a, b) */");
         self.emit_line("/*   WRITE(GPIO(pin), v)  -> embeem_op_$2_5_WRITE_4_GPIO(pin, v) */");
-        self.emit_line("/*   Hybrid operations append extern fn name: */");
-        self.emit_line("/*   WRITE(GPIO(fn(x)))   -> embeem_op_$2_5_WRITE_4_GPIO_fn(x) */");
+        self.emit_line("/* External functions and hybrid operations use extern_prefix (default: embeem_extern_): */");
+        self.emit_line("/*   sensor_read(0)       -> embeem_extern_sensor_read(0) */");
+        self.emit_line("/*   WRITE(GPIO(fn(x)))   -> embeem_extern_$2_5_WRITE_4_GPIO_fn(x) */");
         self.emit_line("");
         self.emit_line("/* Note: Basic operations (ADD, SUB, MUL, etc.) are inlined as C operators. */");
         self.emit_line("/* Other operations must be provided by the platform. */");
@@ -207,6 +219,7 @@ impl CCodegen {
     ///
     /// External functions are declared as `extern` in C, meaning they must be
     /// provided by the environment (linked from another object file or library).
+    /// The function name is mangled with extern_prefix.
     fn emit_extern_fn_decl(&mut self, extern_fn: &ExternFn) -> Result<(), CodegenError> {
         let return_type = match &extern_fn.return_type {
             Some(ty) => self.type_to_c(ty),
@@ -226,8 +239,9 @@ impl CCodegen {
             params
         };
 
-        // External functions are not mangled - they use their declared name directly
-        self.emit_line(&format!("extern {} {}({});", return_type, extern_fn.name, params));
+        // External functions are mangled with extern_prefix
+        let mangled_name = format!("{}{}", self.options.extern_prefix, extern_fn.name);
+        self.emit_line(&format!("extern {} {}({});", return_type, mangled_name, params));
         Ok(())
     }
 
@@ -524,10 +538,10 @@ impl CCodegen {
                 let arg_strs: Result<Vec<_>, _> =
                     args.iter().map(|a| self.expr_to_c(a)).collect();
                 let arg_strs = arg_strs?;
-                // External functions use their declared name directly (no mangling)
+                // External functions use extern_prefix
                 // Regular functions get the mangle prefix
                 let name = if self.type_ctx.is_extern_fn(function) {
-                    function.clone()
+                    format!("{}{}", self.options.extern_prefix, function)
                 } else {
                     self.mangle_name(function)
                 };
@@ -619,21 +633,32 @@ impl CCodegen {
 
     /// Mangle an operation path into a C function name using length-prefixed encoding.
     ///
-    /// The mangling scheme is:
-    /// 1. Start with op_prefix (default: `embeem_op_`)
+    /// The mangling scheme uses different prefixes based on operation type:
+    /// - Non-hybrid operations (pure operation paths): `op_prefix` (default: `embeem_op_`)
+    /// - Hybrid operations (path + extern fn): `extern_prefix` (default: `embeem_extern_`)
+    ///
+    /// Format:
+    /// 1. Start with appropriate prefix
     /// 2. Append `$` and number of path segments
     /// 3. For each segment: `_` + length + `_` + segment name
     /// 4. For hybrid operations: `_` + extern function name
     ///
-    /// Examples (with default prefix):
+    /// Examples (with default prefixes):
     /// - `["FSUB"]` -> `embeem_op_$1_4_FSUB`
     /// - `["WRITE", "GPIO"]` -> `embeem_op_$2_5_WRITE_4_GPIO`
     /// - `["READ", "ADC"]` -> `embeem_op_$2_4_READ_3_ADC`
-    /// - `["WRITE", "GPIO"]` with extern_fn `sensor_read` -> `embeem_op_$2_5_WRITE_4_GPIO_sensor_read`
+    /// - `["WRITE", "GPIO"]` with extern_fn `sensor_read` -> `embeem_extern_$2_5_WRITE_4_GPIO_sensor_read`
     ///
     /// This scheme is unambiguous and allows decoding the original path.
     fn mangle_operation_path(&self, path: &[String], extern_fn: Option<&str>) -> String {
-        let mut result = format!("{}${}", self.options.op_prefix, path.len());
+        // Choose prefix based on whether this is a hybrid operation
+        let prefix = if extern_fn.is_some() {
+            &self.options.extern_prefix
+        } else {
+            &self.options.op_prefix
+        };
+        
+        let mut result = format!("{}${}", prefix, path.len());
         for segment in path {
             result.push_str(&format!("_{}_", segment.len()));
             result.push_str(segment);
@@ -1169,21 +1194,21 @@ mod tests {
         let program = parse_program(src).unwrap();
         let c_code = compile_to_c(&program).unwrap();
         
-        // Check external function declarations are generated
-        assert!(c_code.contains("extern int32_t get_sensor_value(uint8_t channel);"), 
+        // Check external function declarations are generated with extern_prefix
+        assert!(c_code.contains("extern int32_t embeem_extern_get_sensor_value(uint8_t channel);"), 
             "Expected extern declaration, got:\n{}", c_code);
-        assert!(c_code.contains("extern void set_led(uint8_t pin, bool value);"), 
+        assert!(c_code.contains("extern void embeem_extern_set_led(uint8_t pin, bool value);"), 
             "Expected extern declaration, got:\n{}", c_code);
-        assert!(c_code.contains("extern void init_system(void);"), 
+        assert!(c_code.contains("extern void embeem_extern_init_system(void);"), 
             "Expected extern declaration, got:\n{}", c_code);
         
-        // Check that external functions are called (not mangled)
-        assert!(c_code.contains("init_system();"), 
-            "Expected call to init_system, got:\n{}", c_code);
-        assert!(c_code.contains("get_sensor_value("), 
-            "Expected call to get_sensor_value, got:\n{}", c_code);
-        assert!(c_code.contains("set_led("), 
-            "Expected call to set_led, got:\n{}", c_code);
+        // Check that external functions are called with extern_prefix
+        assert!(c_code.contains("embeem_extern_init_system();"), 
+            "Expected call to embeem_extern_init_system, got:\n{}", c_code);
+        assert!(c_code.contains("embeem_extern_get_sensor_value("), 
+            "Expected call to embeem_extern_get_sensor_value, got:\n{}", c_code);
+        assert!(c_code.contains("embeem_extern_set_led("), 
+            "Expected call to embeem_extern_set_led, got:\n{}", c_code);
     }
 
     #[test]
@@ -1199,10 +1224,10 @@ mod tests {
         let program = parse_program(src).unwrap();
         let c_code = compile_to_c(&program).unwrap();
         
-        // Hybrid operations use length-prefixed mangling with extern fn appended
-        // WRITE(GPIO(sensor_read(0))) -> embeem_op_$2_5_WRITE_4_GPIO_sensor_read(0)
-        assert!(c_code.contains("embeem_op_$2_5_WRITE_4_GPIO_sensor_read("), 
-            "Expected hybrid mangled name embeem_op_$2_5_WRITE_4_GPIO_sensor_read, got:\n{}", c_code);
+        // Hybrid operations use extern_prefix with length-prefixed mangling and extern fn appended
+        // WRITE(GPIO(sensor_read(0))) -> embeem_extern_$2_5_WRITE_4_GPIO_sensor_read(0)
+        assert!(c_code.contains("embeem_extern_$2_5_WRITE_4_GPIO_sensor_read("), 
+            "Expected hybrid mangled name embeem_extern_$2_5_WRITE_4_GPIO_sensor_read, got:\n{}", c_code);
     }
 
     #[test]
