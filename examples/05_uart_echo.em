@@ -1,0 +1,52 @@
+// Example 5: UART Communication
+// Simple serial echo with timeout
+
+const UART_NUM: u8 = 0;
+const BAUD_RATE: u32 = 9600;
+const MAX_MESSAGE_SIZE: u16 = 64;
+
+fn main() {
+    // Initialize UART
+    UART_INIT(UART_NUM);
+    UART_SET_BAUD_RATE(UART_NUM, BAUD_RATE);
+    
+    // Send startup message
+    let startup: [u8; 7] = [82, 101, 97, 100, 121, 13, 10];  // "Ready\r\n"
+    for i in 0 to 6 {
+        UART_WRITE_BYTE(UART_NUM, startup[i]);
+    }
+    
+    // Echo loop - process up to 1000 messages
+    repeat 1000 {
+        // Wait for data with timeout
+        let mut received = false;
+        
+        while UART_AVAILABLE(UART_NUM) == 0 max 100 {
+            DELAY_MS(10);  // 1 second total timeout
+        }
+        
+        // Check if we have data
+        if UART_AVAILABLE(UART_NUM) > 0 {
+            // Read and echo up to MAX_MESSAGE_SIZE bytes
+            for i in 0 to MAX_MESSAGE_SIZE - 1 {
+                if UART_AVAILABLE(UART_NUM) > 0 {
+                    let byte = UART_READ_BYTE(UART_NUM);
+                    UART_WRITE_BYTE(UART_NUM, byte);  // Echo back
+                    
+                    // Check for newline (end of message)
+                    if byte == 10 {
+                        // Break would be nice, but we use conditional execution
+                    }
+                }
+            }
+        }
+        
+        DELAY_MS(10);
+    }
+    
+    // Send goodbye message
+    let goodbye: [u8; 6] = [66, 121, 101, 33, 13, 10];  // "Bye!\r\n"
+    for i in 0 to 5 {
+        UART_WRITE_BYTE(UART_NUM, goodbye[i]);
+    }
+}

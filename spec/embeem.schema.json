@@ -1,0 +1,488 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/portal-co/emback/embeem/schema/v1",
+  "title": "Embeem Language Schema",
+  "description": "Machine-readable specification for the Embeem total programming language",
+  "version": "1.0.0",
+  
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+      "description": "A valid Embeem identifier"
+    },
+    
+    "integerLiteral": {
+      "oneOf": [
+        { "type": "integer" },
+        { "type": "string", "pattern": "^0x[0-9a-fA-F]+$" },
+        { "type": "string", "pattern": "^0b[01]+$" }
+      ]
+    },
+    
+    "floatLiteral": {
+      "type": "number"
+    },
+    
+    "booleanLiteral": {
+      "type": "boolean"
+    },
+    
+    "primitiveType": {
+      "enum": ["u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64", "bool"]
+    },
+    
+    "type": {
+      "oneOf": [
+        { "$ref": "#/definitions/primitiveType" },
+        { "$ref": "#/definitions/arrayType" },
+        { "$ref": "#/definitions/tupleType" }
+      ]
+    },
+    
+    "arrayType": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "array" },
+        "elementType": { "$ref": "#/definitions/type" },
+        "size": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "elementType", "size"]
+    },
+    
+    "tupleType": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "tuple" },
+        "elements": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/type" }
+        }
+      },
+      "required": ["kind", "elements"]
+    },
+    
+    "expression": {
+      "oneOf": [
+        { "$ref": "#/definitions/literalExpr" },
+        { "$ref": "#/definitions/identifierExpr" },
+        { "$ref": "#/definitions/binaryExpr" },
+        { "$ref": "#/definitions/unaryExpr" },
+        { "$ref": "#/definitions/ifExpr" },
+        { "$ref": "#/definitions/operationExpr" },
+        { "$ref": "#/definitions/blockExpr" },
+        { "$ref": "#/definitions/callExpr" },
+        { "$ref": "#/definitions/indexExpr" }
+      ]
+    },
+    
+    "literalExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "literal" },
+        "value": {
+          "oneOf": [
+            { "$ref": "#/definitions/integerLiteral" },
+            { "$ref": "#/definitions/floatLiteral" },
+            { "$ref": "#/definitions/booleanLiteral" }
+          ]
+        },
+        "type": { "$ref": "#/definitions/primitiveType" }
+      },
+      "required": ["kind", "value"]
+    },
+    
+    "identifierExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "identifier" },
+        "name": { "$ref": "#/definitions/identifier" }
+      },
+      "required": ["kind", "name"]
+    },
+    
+    "binaryExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "binary" },
+        "operator": {
+          "enum": [
+            "+", "-", "*", "/", "%",
+            "&", "|", "^", "<<", ">>", ">>>",
+            "==", "!=", "<", "<=", ">", ">=",
+            "and", "or"
+          ]
+        },
+        "left": { "$ref": "#/definitions/expression" },
+        "right": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "operator", "left", "right"]
+    },
+    
+    "unaryExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "unary" },
+        "operator": { "enum": ["-", "~", "not"] },
+        "operand": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "operator", "operand"]
+    },
+    
+    "ifExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "if" },
+        "condition": { "$ref": "#/definitions/expression" },
+        "thenBranch": { "$ref": "#/definitions/expression" },
+        "elseBranch": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "condition", "thenBranch", "elseBranch"]
+    },
+    
+    "operationExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "operation" },
+        "name": { "$ref": "#/definitions/operationName" },
+        "arguments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/expression" }
+        }
+      },
+      "required": ["kind", "name", "arguments"]
+    },
+    
+    "blockExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "block" },
+        "statements": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/statement" }
+        },
+        "result": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "statements"]
+    },
+    
+    "callExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "call" },
+        "function": { "$ref": "#/definitions/identifier" },
+        "arguments": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/expression" }
+        }
+      },
+      "required": ["kind", "function", "arguments"]
+    },
+    
+    "indexExpr": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "index" },
+        "array": { "$ref": "#/definitions/expression" },
+        "index": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "array", "index"]
+    },
+    
+    "statement": {
+      "oneOf": [
+        { "$ref": "#/definitions/letStatement" },
+        { "$ref": "#/definitions/assignStatement" },
+        { "$ref": "#/definitions/exprStatement" },
+        { "$ref": "#/definitions/ifStatement" },
+        { "$ref": "#/definitions/forStatement" },
+        { "$ref": "#/definitions/repeatStatement" },
+        { "$ref": "#/definitions/whileStatement" }
+      ]
+    },
+    
+    "letStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "let" },
+        "name": { "$ref": "#/definitions/identifier" },
+        "mutable": { "type": "boolean", "default": false },
+        "type": { "$ref": "#/definitions/type" },
+        "value": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "name", "value"]
+    },
+    
+    "assignStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "assign" },
+        "target": { "$ref": "#/definitions/identifier" },
+        "value": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "target", "value"]
+    },
+    
+    "exprStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "expr" },
+        "expression": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "expression"]
+    },
+    
+    "ifStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "if_stmt" },
+        "condition": { "$ref": "#/definitions/expression" },
+        "thenBlock": { "$ref": "#/definitions/block" },
+        "elseBlock": {
+          "oneOf": [
+            { "$ref": "#/definitions/block" },
+            { "$ref": "#/definitions/ifStatement" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["kind", "condition", "thenBlock"]
+    },
+    
+    "forStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "for" },
+        "variable": { "$ref": "#/definitions/identifier" },
+        "start": { "$ref": "#/definitions/expression" },
+        "end": { "$ref": "#/definitions/expression" },
+        "direction": { "enum": ["to", "downto"] },
+        "body": { "$ref": "#/definitions/block" }
+      },
+      "required": ["kind", "variable", "start", "end", "direction", "body"],
+      "description": "Loop bounds must be compile-time constants for totality"
+    },
+    
+    "repeatStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "repeat" },
+        "count": { "$ref": "#/definitions/expression" },
+        "body": { "$ref": "#/definitions/block" }
+      },
+      "required": ["kind", "count", "body"],
+      "description": "Count must be a compile-time constant for totality"
+    },
+    
+    "whileStatement": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "bounded_while" },
+        "condition": { "$ref": "#/definitions/expression" },
+        "maxIterations": { "$ref": "#/definitions/expression" },
+        "body": { "$ref": "#/definitions/block" }
+      },
+      "required": ["kind", "condition", "maxIterations", "body"],
+      "description": "maxIterations must be a compile-time constant for totality"
+    },
+    
+    "block": {
+      "type": "object",
+      "properties": {
+        "statements": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/statement" }
+        },
+        "result": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["statements"]
+    },
+    
+    "function": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#/definitions/identifier" },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "$ref": "#/definitions/identifier" },
+              "type": { "$ref": "#/definitions/type" }
+            },
+            "required": ["name", "type"]
+          }
+        },
+        "returnType": { "$ref": "#/definitions/type" },
+        "body": { "$ref": "#/definitions/block" }
+      },
+      "required": ["name", "parameters", "body"]
+    },
+    
+    "constDecl": {
+      "type": "object",
+      "properties": {
+        "kind": { "const": "const" },
+        "name": { "$ref": "#/definitions/identifier" },
+        "type": { "$ref": "#/definitions/type" },
+        "value": { "$ref": "#/definitions/expression" }
+      },
+      "required": ["kind", "name", "type", "value"]
+    },
+    
+    "operationName": {
+      "enum": [
+        "ADD", "SUB", "MUL", "DIV", "MOD", "INC", "DEC", "NEG", "ABS",
+        "AND", "OR", "XOR", "NOT", "SHL", "SHR", "SAR", "ROL", "ROR",
+        "CMP", "TEST", "EQ", "NE", "LT", "LE", "GT", "GE",
+        "CALL", "RET", "NOP", "HALT", "SLEEP",
+        "LOAD", "STORE", "MOV", "PUSH", "POP", "SWAP", "MEMCPY", "MEMSET",
+        "SET_BIT", "CLEAR_BIT", "TOGGLE_BIT", "TEST_BIT", "COUNT_ONES", "COUNT_ZEROS", "FIND_FIRST_SET", "FIND_FIRST_ZERO",
+        "FADD", "FSUB", "FMUL", "FDIV", "FSQRT", "FABS", "FCMP",
+        "GPIO_READ", "GPIO_WRITE", "GPIO_TOGGLE", "GPIO_SET_MODE", "GPIO_READ_PORT", "GPIO_WRITE_PORT",
+        "ADC_READ", "ADC_START_CONVERSION", "ADC_READ_MULTI", "DAC_WRITE", "ADC_SET_RESOLUTION", "ADC_SET_REFERENCE",
+        "PWM_START", "PWM_STOP", "PWM_SET_DUTY_CYCLE", "PWM_SET_FREQUENCY", "PWM_SET_PULSE_WIDTH",
+        "TIMER_START", "TIMER_STOP", "TIMER_RESET", "TIMER_READ", "TIMER_SET_PERIOD", "TIMER_SET_COMPARE", "GET_MILLIS", "GET_MICROS", "DELAY_MS", "DELAY_US",
+        "UART_INIT", "UART_WRITE_BYTE", "UART_WRITE_BUFFER", "UART_READ_BYTE", "UART_READ_BUFFER", "UART_AVAILABLE", "UART_FLUSH", "UART_SET_BAUD_RATE",
+        "SPI_INIT", "SPI_TRANSFER", "SPI_TRANSFER_BUFFER", "SPI_SET_MODE", "SPI_SET_CLOCK", "SPI_SET_BIT_ORDER", "SPI_BEGIN_TRANSACTION", "SPI_END_TRANSACTION",
+        "I2C_INIT", "I2C_START", "I2C_STOP", "I2C_WRITE", "I2C_READ", "I2C_WRITE_TO", "I2C_READ_FROM", "I2C_SET_CLOCK", "I2C_SCAN",
+        "CAN_INIT", "CAN_SEND", "CAN_RECEIVE", "CAN_SET_FILTER", "CAN_SET_BITRATE",
+        "USB_INIT", "USB_CONNECT", "USB_DISCONNECT", "USB_WRITE", "USB_READ", "USB_AVAILABLE",
+        "WDT_ENABLE", "WDT_DISABLE", "WDT_RESET", "WDT_SET_TIMEOUT",
+        "DMA_INIT", "DMA_START", "DMA_STOP", "DMA_CONFIG", "DMA_SET_SOURCE", "DMA_SET_DESTINATION",
+        "EEPROM_READ", "EEPROM_WRITE", "EEPROM_UPDATE", "FLASH_READ", "FLASH_WRITE", "FLASH_ERASE",
+        "SET_POWER_MODE", "DISABLE_PERIPHERAL", "ENABLE_PERIPHERAL", "SET_CLOCK_SPEED", "ENTER_STANDBY", "ENTER_DEEP_SLEEP",
+        "RTC_INIT", "RTC_SET_TIME", "RTC_GET_TIME", "RTC_SET_ALARM", "RTC_SET_CALENDAR"
+      ]
+    },
+    
+    "operationArity": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ADD": { "const": 2 },
+        "SUB": { "const": 2 },
+        "MUL": { "const": 2 },
+        "DIV": { "const": 2 },
+        "MOD": { "const": 2 },
+        "INC": { "const": 1 },
+        "DEC": { "const": 1 },
+        "NEG": { "const": 1 },
+        "ABS": { "const": 1 },
+        "AND": { "const": 2 },
+        "OR": { "const": 2 },
+        "XOR": { "const": 2 },
+        "NOT": { "const": 1 },
+        "SHL": { "const": 2 },
+        "SHR": { "const": 2 },
+        "SAR": { "const": 2 },
+        "ROL": { "const": 2 },
+        "ROR": { "const": 2 },
+        "CMP": { "const": 2 },
+        "TEST": { "const": 2 },
+        "EQ": { "const": 2 },
+        "NE": { "const": 2 },
+        "LT": { "const": 2 },
+        "LE": { "const": 2 },
+        "GT": { "const": 2 },
+        "GE": { "const": 2 },
+        "NOP": { "const": 0 },
+        "HALT": { "const": 0 },
+        "SLEEP": { "const": 0 },
+        "GPIO_READ": { "const": 1 },
+        "GPIO_WRITE": { "const": 2 },
+        "GPIO_TOGGLE": { "const": 1 },
+        "GPIO_SET_MODE": { "const": 2 },
+        "GPIO_READ_PORT": { "const": 1 },
+        "GPIO_WRITE_PORT": { "const": 2 },
+        "ADC_READ": { "const": 1 },
+        "DAC_WRITE": { "const": 2 },
+        "ADC_SET_RESOLUTION": { "const": 1 },
+        "PWM_START": { "const": 1 },
+        "PWM_STOP": { "const": 1 },
+        "PWM_SET_DUTY_CYCLE": { "const": 2 },
+        "PWM_SET_FREQUENCY": { "const": 2 },
+        "TIMER_START": { "const": 1 },
+        "TIMER_STOP": { "const": 1 },
+        "TIMER_RESET": { "const": 1 },
+        "TIMER_READ": { "const": 1 },
+        "TIMER_SET_PERIOD": { "const": 2 },
+        "GET_MILLIS": { "const": 0 },
+        "GET_MICROS": { "const": 0 },
+        "DELAY_MS": { "const": 1 },
+        "DELAY_US": { "const": 1 },
+        "UART_INIT": { "const": 1 },
+        "UART_WRITE_BYTE": { "const": 2 },
+        "UART_READ_BYTE": { "const": 1 },
+        "UART_AVAILABLE": { "const": 1 },
+        "UART_FLUSH": { "const": 1 },
+        "UART_SET_BAUD_RATE": { "const": 2 },
+        "I2C_INIT": { "const": 1 },
+        "I2C_START": { "const": 1 },
+        "I2C_STOP": { "const": 1 },
+        "I2C_WRITE_TO": { "const": 3 },
+        "I2C_READ_FROM": { "const": 2 },
+        "I2C_SET_CLOCK": { "const": 2 },
+        "WDT_ENABLE": { "const": 0 },
+        "WDT_DISABLE": { "const": 0 },
+        "WDT_RESET": { "const": 0 },
+        "WDT_SET_TIMEOUT": { "const": 1 }
+      }
+    }
+  },
+  
+  "type": "object",
+  "properties": {
+    "program": {
+      "type": "object",
+      "properties": {
+        "constants": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/constDecl" }
+        },
+        "functions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/function" }
+        },
+        "main": { "$ref": "#/definitions/function" }
+      },
+      "required": ["functions", "main"]
+    }
+  },
+  
+  "totalityConstraints": {
+    "description": "Constraints that ensure program termination",
+    "rules": [
+      {
+        "id": "bounded-for",
+        "description": "for loop bounds must be compile-time constants",
+        "applies_to": "forStatement",
+        "constraint": "start and end must be const_expr"
+      },
+      {
+        "id": "bounded-repeat",
+        "description": "repeat count must be a compile-time constant",
+        "applies_to": "repeatStatement",
+        "constraint": "count must be const_expr"
+      },
+      {
+        "id": "bounded-while",
+        "description": "while loops must have maximum iteration bound",
+        "applies_to": "whileStatement",
+        "constraint": "maxIterations must be const_expr"
+      },
+      {
+        "id": "no-recursion",
+        "description": "functions cannot call themselves directly or indirectly",
+        "applies_to": "function",
+        "constraint": "call graph must be acyclic (DAG)"
+      },
+      {
+        "id": "total-primitives",
+        "description": "all primitive operations terminate",
+        "applies_to": "operationExpr",
+        "constraint": "all ops in operationName are total"
+      }
+    ]
+  }
+}
