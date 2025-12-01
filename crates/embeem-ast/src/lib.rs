@@ -1,7 +1,8 @@
 //! AST types for the Embeem total programming language.
 //!
-//! This crate provides the abstract syntax tree representation for Embeem programs,
-//! including the core `Expr` type that is used for desugared representations.
+//! This crate provides the abstract syntax tree representation for Embeem programs.
+//! Operations are represented using a path-based system where nested operations like
+//! `WRITE(GPIO(pin), value)` are stored as `path: ["WRITE", "GPIO"], args: [pin, value]`.
 //!
 //! # Identifier Naming Conventions
 //!
@@ -19,8 +20,6 @@ extern crate alloc;
 #[cfg(feature = "alloc")]
 mod ast;
 #[cfg(feature = "alloc")]
-mod expr;
-#[cfg(feature = "alloc")]
 mod ops;
 #[cfg(feature = "alloc")]
 mod pretty;
@@ -31,9 +30,7 @@ mod infer;
 #[cfg(feature = "alloc")]
 pub use ast::*;
 #[cfg(feature = "alloc")]
-pub use expr::Expr;
-#[cfg(feature = "alloc")]
-pub use ops::{is_upper_snake_case, is_valid_user_identifier, *};
+pub use ops::{is_upper_snake_case, is_valid_user_identifier, op_name_from_str, OpKind};
 #[cfg(feature = "alloc")]
 pub use pretty::{pretty_print_program, PrettyPrint, PrettyPrintContext};
 
