@@ -1,0 +1,16 @@
+[package]
+name = "embeem-ast"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "AST types for the Embeem total programming language"
+repository.workspace = true
+
+[dependencies]
+
+[features]
+default = ["alloc"]
+alloc = []
+
+[lints.rust]
+unsafe_code = "forbid"
