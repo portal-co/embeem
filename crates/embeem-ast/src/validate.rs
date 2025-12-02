@@ -581,8 +581,56 @@ fn validate_statement(stmt: &Statement, ctx: &mut ValidationContext) -> Validati
             result.merge(validate_expression(start, ctx));
             result.merge(validate_expression(end, ctx));
 
-            // For spec compliance, range bounds should be constant expressions
-            // But we allow immutable variables too per spec section 6.2.1
+            // Spec section 6.2.1: range bounds must be compile-time constants or immutable variables
+            match ctx.is_valid_loop_bound(start) {
+                BoundCheckResult::Valid => {}
+                BoundCheckResult::MutableVariable => {
+                    result.add_error(
+                        ValidationErrorKind::MutableLoopBound,
+                        "for loop start bound must be a compile-time constant or immutable variable".to_string(),
+                        &ctx.context_string(),
+                    );
+                }
+                BoundCheckResult::NonConstant => {
+                    result.add_error(
+                        ValidationErrorKind::NonConstantLoopBound,
+                        "for loop start bound must be a compile-time constant or immutable variable".to_string(),
+                        &ctx.context_string(),
+                    );
+                }
+                BoundCheckResult::InvalidType => {
+                    result.add_error(
+                        ValidationErrorKind::NonConstantLoopBound,
+                        "for loop start bound must be an integer".to_string(),
+                        &ctx.context_string(),
+                    );
+                }
+            }
+
+            match ctx.is_valid_loop_bound(end) {
+                BoundCheckResult::Valid => {}
+                BoundCheckResult::MutableVariable => {
+                    result.add_error(
+                        ValidationErrorKind::MutableLoopBound,
+                        "for loop end bound must be a compile-time constant or immutable variable".to_string(),
+                        &ctx.context_string(),
+                    );
+                }
+                BoundCheckResult::NonConstant => {
+                    result.add_error(
+                        ValidationErrorKind::NonConstantLoopBound,
+                        "for loop end bound must be a compile-time constant or immutable variable".to_string(),
+                        &ctx.context_string(),
+                    );
+                }
+                BoundCheckResult::InvalidType => {
+                    result.add_error(
+                        ValidationErrorKind::NonConstantLoopBound,
+                        "for loop end bound must be an integer".to_string(),
+                        &ctx.context_string(),
+                    );
+                }
+            }
 
             // Loop variable is immutable within the body
             ctx.add_immutable(variable);
@@ -806,7 +854,8 @@ fn validate_const_expr(expr: &Expression, ctx: &mut ValidationContext) -> Valida
 mod tests {
     use super::*;
     use alloc::vec;
-    use crate::{Block, Function};
+    use alloc::boxed::Box;
+    use crate::{Block, Function, BinaryOp, RangeDirection};
 
     #[test]
     fn test_valid_user_identifiers() {
@@ -886,5 +935,69 @@ mod tests {
         let expr = Expression::Literal(Literal::Integer(100));
         let check = ctx.is_valid_loop_bound(&expr);
         assert_eq!(check, BoundCheckResult::Valid);
+    }
+
+    #[test]
+    fn test_validate_function_call_loop_bound() {
+        // Function calls are not valid loop bounds (not statically known)
+        let ctx = ValidationContext::new();
+
+        let expr = Expression::Call {
+            function: "get_count".to_string(),
+            args: vec![],
+        };
+        let check = ctx.is_valid_loop_bound(&expr);
+        assert_eq!(check, BoundCheckResult::NonConstant);
+    }
+
+    #[test]
+    fn test_validate_binary_expr_with_constant() {
+        // Binary expression with constant and literal should be valid
+        let mut ctx = ValidationContext::new();
+        ctx.add_constant("MaxSize");
+
+        let expr = Expression::Binary {
+            left: Box::new(Expression::Identifier("MaxSize".to_string())),
+            op: BinaryOp::Sub,
+            right: Box::new(Expression::Literal(Literal::Integer(1))),
+        };
+        let check = ctx.is_valid_loop_bound(&expr);
+        assert_eq!(check, BoundCheckResult::Valid);
+    }
+
+    #[test]
+    fn test_validate_binary_expr_with_mutable() {
+        // Binary expression with mutable variable should fail
+        let mut ctx = ValidationContext::new();
+        ctx.add_mutable("count");
+
+        let expr = Expression::Binary {
+            left: Box::new(Expression::Identifier("count".to_string())),
+            op: BinaryOp::Add,
+            right: Box::new(Expression::Literal(Literal::Integer(10))),
+        };
+        let check = ctx.is_valid_loop_bound(&expr);
+        assert_eq!(check, BoundCheckResult::MutableVariable);
+    }
+
+    #[test]
+    fn test_validate_for_loop_with_mutable_bound() {
+        let mut ctx = ValidationContext::new();
+        ctx.add_mutable("end_val");
+
+        let stmt = Statement::For {
+            variable: "i".to_string(),
+            start: Expression::Literal(Literal::Integer(0)),
+            end: Expression::Identifier("end_val".to_string()),
+            direction: RangeDirection::To,
+            body: Block {
+                statements: vec![],
+                result: None,
+            },
+        };
+
+        let result = validate_statement(&stmt, &mut ctx);
+        assert!(!result.is_valid());
+        assert!(result.errors.iter().any(|e| matches!(e.kind, ValidationErrorKind::MutableLoopBound)));
     }
 }
