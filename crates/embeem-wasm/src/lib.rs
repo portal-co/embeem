@@ -47,7 +47,8 @@
 //! - `f32` → `f32`
 //! - `f64` → `f64`
 //! - `bool` → `i32`
-//! - Arrays are stored in linear memory
+//! - Arrays are "splatted" into multiple locals (one per element)
+//! - Tuples are "splatted" into multiple locals (one per field)
 
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]

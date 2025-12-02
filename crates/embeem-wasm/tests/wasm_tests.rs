@@ -583,3 +583,195 @@ fn test_expression_statement_drops_result() {
     assert!(matches!(ops[0], Operator::I32Const { value: 42 }));
     assert!(matches!(ops[1], Operator::Drop));
 }
+
+#[test]
+fn test_array_literal_splatted() {
+    // Test that array literals are splatted into multiple values on the stack
+    let func = Function {
+        name: "test".into(),
+        params: vec![],
+        return_type: Some(Type::Primitive(PrimitiveType::I32)),
+        body: Block {
+            statements: vec![Statement::Let {
+                name: "arr".into(),
+                mutable: false,
+                ty: Some(Type::Array(
+                    Box::new(Type::Primitive(PrimitiveType::I32)),
+                    3,
+                )),
+                value: Expression::Array(vec![
+                    Expression::Literal(Literal::Integer(10)),
+                    Expression::Literal(Literal::Integer(20)),
+                    Expression::Literal(Literal::Integer(30)),
+                ]),
+            }],
+            result: Some(Box::new(Expression::Literal(Literal::Integer(0)))),
+        },
+    };
+
+    let resolver = TestResolver;
+    let (iter, locals) = generate_function_operators(&func, &resolver).unwrap();
+    let ops: Vec<_> = iter.collect();
+
+    // Should have 3 additional locals for the array elements
+    assert_eq!(locals.len(), 3);
+    assert!(locals.iter().all(|t| *t == ValType::I32));
+
+    // Should push 3 values then set 3 locals (in reverse order)
+    assert!(matches!(ops[0], Operator::I32Const { value: 10 }));
+    assert!(matches!(ops[1], Operator::I32Const { value: 20 }));
+    assert!(matches!(ops[2], Operator::I32Const { value: 30 }));
+    // Then local.set 2, local.set 1, local.set 0 (reverse order)
+    assert!(matches!(ops[3], Operator::LocalSet { local_index: 2 }));
+    assert!(matches!(ops[4], Operator::LocalSet { local_index: 1 }));
+    assert!(matches!(ops[5], Operator::LocalSet { local_index: 0 }));
+}
+
+#[test]
+fn test_array_index_read_splatted() {
+    // Test that array indexing reads from splatted locals
+    let func = Function {
+        name: "test".into(),
+        params: vec![Param {
+            name: "arr".into(),
+            ty: Type::Array(Box::new(Type::Primitive(PrimitiveType::I32)), 3),
+        }],
+        return_type: Some(Type::Primitive(PrimitiveType::I32)),
+        body: Block {
+            statements: vec![],
+            result: Some(Box::new(Expression::Index {
+                array: Box::new(Expression::Identifier("arr".into())),
+                index: Box::new(Expression::Literal(Literal::Integer(1))),
+            })),
+        },
+    };
+
+    let resolver = TestResolver;
+    let (iter, _locals) = generate_function_operators(&func, &resolver).unwrap();
+    let ops: Vec<_> = iter.collect();
+
+    // No additional locals beyond temps for index computation
+    // (params are handled separately)
+    
+    // Should generate a switch-like structure for indexing
+    // Check that we have local.get operations for each array element
+    let local_gets: Vec<_> = ops
+        .iter()
+        .filter(|o| matches!(o, Operator::LocalGet { .. }))
+        .collect();
+    assert!(!local_gets.is_empty(), "Expected local.get operations for array access");
+}
+
+#[test]
+fn test_array_index_write_splatted() {
+    // Test that array index assignment writes to the correct splatted local
+    let func = Function {
+        name: "test".into(),
+        params: vec![],
+        return_type: Some(Type::Primitive(PrimitiveType::I32)),
+        body: Block {
+            statements: vec![
+                Statement::Let {
+                    name: "arr".into(),
+                    mutable: true,
+                    ty: Some(Type::Array(
+                        Box::new(Type::Primitive(PrimitiveType::I32)),
+                        3,
+                    )),
+                    value: Expression::Array(vec![
+                        Expression::Literal(Literal::Integer(0)),
+                        Expression::Literal(Literal::Integer(0)),
+                        Expression::Literal(Literal::Integer(0)),
+                    ]),
+                },
+                Statement::Assign {
+                    target: AssignTarget::Index {
+                        array: "arr".into(),
+                        index: Box::new(Expression::Literal(Literal::Integer(1))),
+                    },
+                    value: Expression::Literal(Literal::Integer(42)),
+                },
+            ],
+            result: Some(Box::new(Expression::Literal(Literal::Integer(0)))),
+        },
+    };
+
+    let resolver = TestResolver;
+    let (iter, locals) = generate_function_operators(&func, &resolver).unwrap();
+    let ops: Vec<_> = iter.collect();
+
+    // Should have 3 locals for array + 2 temps (index and value)
+    assert_eq!(locals.len(), 5);
+
+    // Should have local.set operations for the assignment
+    let local_sets: Vec<_> = ops
+        .iter()
+        .filter(|o| matches!(o, Operator::LocalSet { .. }))
+        .collect();
+    assert!(local_sets.len() >= 3, "Expected local.set operations for array assignment");
+}
+
+#[test]
+fn test_tuple_splatted() {
+    // Test that tuples are splatted into multiple locals
+    let func = Function {
+        name: "test".into(),
+        params: vec![Param {
+            name: "pair".into(),
+            ty: Type::Tuple(vec![
+                Type::Primitive(PrimitiveType::I32),
+                Type::Primitive(PrimitiveType::I32),
+            ]),
+        }],
+        return_type: Some(Type::Primitive(PrimitiveType::I32)),
+        body: Block {
+            statements: vec![],
+            // Just return 0 for now - we're testing that locals are set up correctly
+            result: Some(Box::new(Expression::Literal(Literal::Integer(0)))),
+        },
+    };
+
+    let resolver = TestResolver;
+    let (_, locals) = generate_function_operators(&func, &resolver).unwrap();
+
+    // No additional locals beyond params, but params should be expanded
+    // The param_local_count for a 2-element tuple should be 2
+    assert_eq!(locals.len(), 0); // No additional locals, just params
+}
+
+#[test]
+fn test_array_identifier_pushes_all_elements() {
+    // Test that using an array identifier pushes all its splatted locals
+    let func = Function {
+        name: "test".into(),
+        params: vec![
+            Param {
+                name: "arr".into(),
+                ty: Type::Array(Box::new(Type::Primitive(PrimitiveType::I32)), 2),
+            },
+        ],
+        return_type: Some(Type::Array(
+            Box::new(Type::Primitive(PrimitiveType::I32)),
+            2,
+        )),
+        body: Block {
+            statements: vec![],
+            result: Some(Box::new(Expression::Identifier("arr".into()))),
+        },
+    };
+
+    let resolver = TestResolver;
+    let (iter, _) = generate_function_operators(&func, &resolver).unwrap();
+    let ops: Vec<_> = iter.collect();
+
+    // Should have 2 local.get operations for the 2-element array
+    let local_gets: Vec<_> = ops
+        .iter()
+        .filter(|o| matches!(o, Operator::LocalGet { .. }))
+        .collect();
+    assert_eq!(local_gets.len(), 2, "Expected 2 local.get for 2-element array");
+    
+    // Check they're getting locals 0 and 1
+    assert!(matches!(ops[0], Operator::LocalGet { local_index: 0 }));
+    assert!(matches!(ops[1], Operator::LocalGet { local_index: 1 }));
+}

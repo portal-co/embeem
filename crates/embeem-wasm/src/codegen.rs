@@ -11,7 +11,7 @@ use embeem_ast::{
     AssignTarget, BinaryOp, Block, Expression, Function, Literal, Param, PrimitiveType,
     RangeDirection, Statement, Type, UnaryOp, ElseBlock,
 };
-use wasmparser::{BlockType, Ieee64, MemArg, Operator, ValType};
+use wasmparser::{BlockType, Ieee64, Operator, ValType};
 
 /// Trait for resolving function names to WebAssembly function indices.
 ///
@@ -59,20 +59,62 @@ pub fn primitive_to_wasm_type(ty: PrimitiveType) -> ValType {
 
 /// Maps Embeem types to WebAssembly value types.
 ///
-/// Arrays and tuples are represented as `i32` pointers into linear memory.
+/// For compound types (arrays/tuples), returns the element type.
+/// Use `type_local_count` to determine how many locals are needed.
 pub fn type_to_wasm(ty: &Type) -> ValType {
     match ty {
         Type::Primitive(p) => primitive_to_wasm_type(*p),
-        Type::Array(_, _) => ValType::I32, // Pointer to linear memory
-        Type::Tuple(_) => ValType::I32,    // Pointer to linear memory
+        Type::Array(elem_ty, _) => type_to_wasm(elem_ty),
+        Type::Tuple(elems) => {
+            // For tuples, return the first element type (or i32 if empty)
+            elems.first().map(type_to_wasm).unwrap_or(ValType::I32)
+        }
     }
+}
+
+/// Returns the number of WASM locals needed to represent an Embeem type.
+///
+/// Arrays and tuples are "splatted" into multiple locals.
+pub fn type_local_count(ty: &Type) -> usize {
+    match ty {
+        Type::Primitive(_) => 1,
+        Type::Array(elem_ty, len) => type_local_count(elem_ty) * (*len as usize),
+        Type::Tuple(elems) => elems.iter().map(type_local_count).sum(),
+    }
+}
+
+/// Returns the WASM types for all locals needed to represent an Embeem type.
+///
+/// For compound types, this returns multiple types (one per splatted local).
+pub fn type_to_wasm_locals(ty: &Type) -> Vec<ValType> {
+    match ty {
+        Type::Primitive(p) => vec![primitive_to_wasm_type(*p)],
+        Type::Array(elem_ty, _len) => {
+            let elem_types = type_to_wasm_locals(elem_ty);
+            elem_types.into_iter().cycle().take(type_local_count(ty)).collect()
+        }
+        Type::Tuple(elems) => {
+            elems.iter().flat_map(type_to_wasm_locals).collect()
+        }
+    }
+}
+
+/// Information about a declared variable.
+#[derive(Clone, Debug)]
+pub struct VarInfo {
+    /// The starting local index for this variable.
+    pub start_index: u32,
+    /// The number of locals this variable occupies.
+    pub local_count: usize,
+    /// The Embeem type of the variable.
+    pub ty: Type,
 }
 
 /// Context for tracking local variables during code generation.
 #[derive(Clone, Debug, Default)]
 pub struct LocalContext {
-    /// Maps variable names to their local indices.
-    locals: BTreeMap<String, u32>,
+    /// Maps variable names to their info (including start index and span).
+    vars: BTreeMap<String, VarInfo>,
     /// Next available local index.
     next_local: u32,
     /// Types of all locals (for validation).
@@ -89,20 +131,35 @@ impl LocalContext {
     pub fn from_params(params: &[Param]) -> Self {
         let mut ctx = Self::new();
         for param in params {
-            let wasm_ty = type_to_wasm(&param.ty);
-            ctx.locals.insert(param.name.clone(), ctx.next_local);
-            ctx.local_types.push(wasm_ty);
-            ctx.next_local += 1;
+            let wasm_types = type_to_wasm_locals(&param.ty);
+            let local_count = wasm_types.len();
+            ctx.vars.insert(param.name.clone(), VarInfo {
+                start_index: ctx.next_local,
+                local_count,
+                ty: param.ty.clone(),
+            });
+            for wasm_ty in wasm_types {
+                ctx.local_types.push(wasm_ty);
+                ctx.next_local += 1;
+            }
         }
         ctx
     }
 
-    /// Declare a new local variable and return its index.
+    /// Declare a new local variable and return its starting index.
     pub fn declare_local(&mut self, name: &str, ty: &Type) -> u32 {
         let idx = self.next_local;
-        self.locals.insert(name.to_string(), idx);
-        self.local_types.push(type_to_wasm(ty));
-        self.next_local += 1;
+        let wasm_types = type_to_wasm_locals(ty);
+        let local_count = wasm_types.len();
+        self.vars.insert(name.to_string(), VarInfo {
+            start_index: idx,
+            local_count,
+            ty: ty.clone(),
+        });
+        for wasm_ty in wasm_types {
+            self.local_types.push(wasm_ty);
+            self.next_local += 1;
+        }
         idx
     }
 
@@ -114,14 +171,35 @@ impl LocalContext {
         idx
     }
 
-    /// Look up a local variable by name.
+    /// Look up a local variable by name, returning its starting index.
     pub fn get_local(&self, name: &str) -> Option<u32> {
-        self.locals.get(name).copied()
+        self.vars.get(name).map(|info| info.start_index)
+    }
+
+    /// Look up full variable info by name.
+    pub fn get_var_info(&self, name: &str) -> Option<&VarInfo> {
+        self.vars.get(name)
     }
 
     /// Get all local types (excluding parameters, which are separate in WASM).
     pub fn get_additional_locals(&self, param_count: usize) -> &[ValType] {
-        &self.local_types[param_count..]
+        // Count how many actual WASM locals the params occupy
+        let param_local_count: usize = self.local_types.len().min(
+            self.vars.values()
+                .filter(|v| v.start_index < param_count as u32)
+                .map(|v| v.local_count)
+                .sum()
+        );
+        &self.local_types[param_local_count..]
+    }
+
+    /// Get the total number of WASM locals used by parameters.
+    pub fn param_local_count(&self, param_count: usize) -> usize {
+        // Sum the local counts for the first `param_count` declared variables
+        self.vars.values()
+            .take(param_count)
+            .map(|v| v.local_count)
+            .sum()
     }
 }
 
@@ -196,62 +274,80 @@ impl<'a, R: FunctionResolver> WasmCodegen<'a, R> {
     ) -> Result<(), WasmCodegenError> {
         match stmt {
             Statement::Let { name, ty, value, .. } => {
-                // Determine type (from annotation or inference would be needed)
-                let _wasm_ty = ty
-                    .as_ref()
-                    .map(type_to_wasm)
-                    .unwrap_or(ValType::I32);
+                let actual_ty = ty.as_ref().unwrap_or(&Type::Primitive(PrimitiveType::I32));
+                let local_count = type_local_count(actual_ty);
                 
-                // Declare the local
-                let local_idx = self.locals.declare_local(name, ty.as_ref().unwrap_or(&Type::Primitive(PrimitiveType::I32)));
+                // Declare the local(s)
+                let local_idx = self.locals.declare_local(name, actual_ty);
                 
-                // Generate value expression
+                // Generate value expression (may push multiple values for arrays/tuples)
                 self.generate_expression(value, ops)?;
                 
-                // Store to local
-                ops.push(Operator::LocalSet { local_index: local_idx });
+                // Store to local(s) - in reverse order since stack is LIFO
+                for i in (0..local_count).rev() {
+                    ops.push(Operator::LocalSet { local_index: local_idx + i as u32 });
+                }
             }
 
             Statement::Assign { target, value } => {
                 match target {
                     AssignTarget::Identifier(name) => {
-                        let local_idx = self.locals.get_local(name).ok_or_else(|| {
+                        let var_info = self.locals.get_var_info(name).ok_or_else(|| {
                             WasmCodegenError::new(format!("undefined variable: {}", name))
-                        })?;
+                        })?.clone();
                         
                         self.generate_expression(value, ops)?;
-                        ops.push(Operator::LocalSet { local_index: local_idx });
+                        
+                        // Store to local(s) - in reverse order since stack is LIFO
+                        for i in (0..var_info.local_count).rev() {
+                            ops.push(Operator::LocalSet { local_index: var_info.start_index + i as u32 });
+                        }
                     }
                     AssignTarget::Index { array, index } => {
-                        // For array index assignment: arr[idx] = value
-                        // We need to compute: base_addr + idx * element_size
-                        // Then store the value at that address
+                        // For array index assignment with splatted locals: arr[idx] = value
+                        // We need to compute which local to write to based on the index.
+                        // Since WASM doesn't have computed local access, we generate a switch.
                         
-                        let arr_local = self.locals.get_local(array).ok_or_else(|| {
+                        let var_info = self.locals.get_var_info(array).ok_or_else(|| {
                             WasmCodegenError::new(format!("undefined array: {}", array))
-                        })?;
+                        })?.clone();
                         
-                        // Get array base address
-                        ops.push(Operator::LocalGet { local_index: arr_local });
+                        // Get element count from the type
+                        let elem_count = match &var_info.ty {
+                            Type::Array(elem_ty, len) => {
+                                let elem_locals = type_local_count(elem_ty);
+                                if elem_locals != 1 {
+                                    return Err(WasmCodegenError::new(
+                                        "nested compound types in arrays not yet supported"
+                                    ));
+                                }
+                                *len as usize
+                            }
+                            _ => return Err(WasmCodegenError::new(
+                                format!("cannot index non-array type: {}", array)
+                            )),
+                        };
                         
-                        // Compute index offset (assuming 4-byte elements for now)
+                        // Generate index expression and store in temp
+                        let idx_temp = self.locals.alloc_temp(ValType::I32);
                         self.generate_expression(index, ops)?;
-                        ops.push(Operator::I32Const { value: 4 });
-                        ops.push(Operator::I32Mul);
-                        ops.push(Operator::I32Add);
+                        ops.push(Operator::LocalSet { local_index: idx_temp });
                         
-                        // Generate value to store
+                        // Generate value expression and store in temp
+                        let val_temp = self.locals.alloc_temp(ValType::I32);
                         self.generate_expression(value, ops)?;
+                        ops.push(Operator::LocalSet { local_index: val_temp });
                         
-                        // Store to memory
-                        ops.push(Operator::I32Store {
-                            memarg: MemArg {
-                                align: 2,
-                                max_align: 2,
-                                offset: 0,
-                                memory: 0,
-                            },
-                        });
+                        // Generate switch: if idx == 0, set local[0]; else if idx == 1, set local[1]; etc.
+                        for i in 0..elem_count {
+                            ops.push(Operator::LocalGet { local_index: idx_temp });
+                            ops.push(Operator::I32Const { value: i as i32 });
+                            ops.push(Operator::I32Eq);
+                            ops.push(Operator::If { blockty: BlockType::Empty });
+                            ops.push(Operator::LocalGet { local_index: val_temp });
+                            ops.push(Operator::LocalSet { local_index: var_info.start_index + i as u32 });
+                            ops.push(Operator::End);
+                        }
                     }
                 }
             }
@@ -516,10 +612,13 @@ impl<'a, R: FunctionResolver> WasmCodegen<'a, R> {
             }
 
             Expression::Identifier(name) => {
-                let local_idx = self.locals.get_local(name).ok_or_else(|| {
+                let var_info = self.locals.get_var_info(name).ok_or_else(|| {
                     WasmCodegenError::new(format!("undefined variable: {}", name))
-                })?;
-                ops.push(Operator::LocalGet { local_index: local_idx });
+                })?.clone();
+                // Push all locals for this variable (handles compound types)
+                for i in 0..var_info.local_count {
+                    ops.push(Operator::LocalGet { local_index: var_info.start_index + i as u32 });
+                }
             }
 
             Expression::QualifiedIdentifier { namespace, name } => {
@@ -685,31 +784,71 @@ impl<'a, R: FunctionResolver> WasmCodegen<'a, R> {
             }
 
             Expression::Index { array, index } => {
-                // Array indexing: arr[idx]
-                // Compute address: base + idx * element_size
-                self.generate_expression(array, ops)?;
-                self.generate_expression(index, ops)?;
-                ops.push(Operator::I32Const { value: 4 }); // Assume 4-byte elements
-                ops.push(Operator::I32Mul);
-                ops.push(Operator::I32Add);
+                // Array indexing with splatted locals: arr[idx]
+                // Need to generate a switch since WASM doesn't have computed local access.
                 
-                // Load from memory
-                ops.push(Operator::I32Load {
-                    memarg: MemArg {
-                        align: 2,
-                        max_align: 2,
-                        offset: 0,
-                        memory: 0,
-                    },
-                });
+                // First, check if 'array' is an identifier we can look up
+                if let Expression::Identifier(name) = array.as_ref() {
+                    let var_info = self.locals.get_var_info(name).ok_or_else(|| {
+                        WasmCodegenError::new(format!("undefined array: {}", name))
+                    })?.clone();
+                    
+                    // Get element count from the type
+                    let elem_count = match &var_info.ty {
+                        Type::Array(elem_ty, len) => {
+                            let elem_locals = type_local_count(elem_ty);
+                            if elem_locals != 1 {
+                                return Err(WasmCodegenError::new(
+                                    "nested compound types in arrays not yet supported"
+                                ));
+                            }
+                            *len as usize
+                        }
+                        _ => return Err(WasmCodegenError::new(
+                            format!("cannot index non-array type: {}", name)
+                        )),
+                    };
+                    
+                    // Generate index expression and store in temp
+                    let idx_temp = self.locals.alloc_temp(ValType::I32);
+                    self.generate_expression(index, ops)?;
+                    ops.push(Operator::LocalSet { local_index: idx_temp });
+                    
+                    // Generate switch using br_table for efficiency
+                    // Result will be stored in a temp local
+                    let result_temp = self.locals.alloc_temp(ValType::I32);
+                    
+                    // Initialize result to 0 (default)
+                    ops.push(Operator::I32Const { value: 0 });
+                    ops.push(Operator::LocalSet { local_index: result_temp });
+                    
+                    // Generate switch: if idx == 0, get local[0]; else if idx == 1, get local[1]; etc.
+                    for i in 0..elem_count {
+                        ops.push(Operator::LocalGet { local_index: idx_temp });
+                        ops.push(Operator::I32Const { value: i as i32 });
+                        ops.push(Operator::I32Eq);
+                        ops.push(Operator::If { blockty: BlockType::Empty });
+                        ops.push(Operator::LocalGet { local_index: var_info.start_index + i as u32 });
+                        ops.push(Operator::LocalSet { local_index: result_temp });
+                        ops.push(Operator::End);
+                    }
+                    
+                    // Push the result onto the stack
+                    ops.push(Operator::LocalGet { local_index: result_temp });
+                } else {
+                    return Err(WasmCodegenError::new(
+                        "array indexing only supported on identifiers, not expressions"
+                    ));
+                }
             }
 
-            Expression::Array(_elements) => {
-                // Array literals would need memory allocation
-                // For now, return an error
-                Err(WasmCodegenError::new(
-                    "array literals require memory allocation (not yet implemented)",
-                ))?;
+            Expression::Array(elements) => {
+                // Array literals: generate each element expression
+                // The values are left on the stack in order for the caller to store
+                // This works because arrays are splatted into multiple locals
+                for elem in elements {
+                    self.generate_expression(elem, ops)?;
+                }
             }
 
             Expression::Cast { value, ty } => {
