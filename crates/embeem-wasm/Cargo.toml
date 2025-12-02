@@ -1,0 +1,22 @@
+[package]
+name = "embeem-wasm"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "WebAssembly code generator for the Embeem total programming language"
+repository.workspace = true
+
+[dependencies]
+embeem-ast = { path = "../embeem-ast", features = ["inference"] }
+wasmparser = { version = "0.242", default-features = false }
+
+[dev-dependencies]
+embeem-parser = { path = "../embeem-parser" }
+
+[features]
+default = ["std"]
+std = ["wasmparser/std", "embeem-ast/alloc"]
+alloc = ["embeem-ast/alloc"]
+
+[lints.rust]
+unsafe_code = "forbid"

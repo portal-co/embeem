@@ -3,6 +3,7 @@ members = [
     "crates/embeem-ast",
     "crates/embeem-parser",
     "crates/embeem-codegen",
+    "crates/embeem-wasm",
 ]
 resolver = "3"
 
