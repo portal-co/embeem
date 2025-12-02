@@ -19,12 +19,12 @@ fn test_simple_program() {
 #[test]
 fn test_constants() {
     let src = r#"
-        const LED_PIN: u8 = 13;
+        const LedPin: u8 = 13;
         fn main() {}
     "#;
     let program = parse_program(src).unwrap();
     let c_code = compile_to_c(&program).unwrap();
-    assert!(c_code.contains("#define LED_PIN"));
+    assert!(c_code.contains("#define LedPin"));
 }
 
 #[test]
@@ -305,11 +305,11 @@ fn test_operation_mangling_examples() {
 #[test]
 fn test_module_codegen() {
     let src = r#"
-        export const LED_PIN: u8 = 13;
+        export const LedPin: u8 = 13;
         
         export fn blink(times: u32) {
             for i in 0 to times {
-                GPIO_TOGGLE(LED_PIN);
+                GPIO_TOGGLE(LedPin);
             }
         }
         
@@ -325,7 +325,7 @@ fn test_module_codegen() {
     assert!(c_code.contains("/* Module: gpio */"), "Expected module comment, got:\n{}", c_code);
     
     // Check that constants are mangled with module path
-    assert!(c_code.contains("embeem_mod_$1_4_gpio_LED_PIN"), 
+    assert!(c_code.contains("embeem_mod_$1_4_gpio_LedPin"), 
         "Expected module-mangled constant, got:\n{}", c_code);
     
     // Check that functions are mangled with module path

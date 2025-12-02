@@ -17,12 +17,12 @@ fn test_simple_program() {
 #[test]
 fn test_constants() {
     let src = r#"
-        const LED_PIN: u8 = 13;
+        const LedPin: u8 = 13;
         fn main() {}
     "#;
     let program = parse_program(src).unwrap();
     let ts_code = compile_to_ts(&program).unwrap();
-    assert!(ts_code.contains("export const LED_PIN: number = 13;"), "Expected export const, got:\n{}", ts_code);
+    assert!(ts_code.contains("export const LedPin: number = 13;"), "Expected export const, got:\n{}", ts_code);
 }
 
 #[test]
@@ -295,7 +295,7 @@ fn test_esm_constants() {
             ModuleItem {
                 exported: true,
                 item: Item::Const(ConstDecl {
-                    name: "LED_PIN".to_string(),
+                    name: "LedPin".to_string(),
                     ty: Type::Primitive(PrimitiveType::U8),
                     value: Expression::Literal(Literal::Integer(13)),
                 }),
@@ -303,7 +303,7 @@ fn test_esm_constants() {
             ModuleItem {
                 exported: false,
                 item: Item::Const(ConstDecl {
-                    name: "INTERNAL".to_string(),
+                    name: "Internal".to_string(),
                     ty: Type::Primitive(PrimitiveType::U32),
                     value: Expression::Literal(Literal::Integer(100)),
                 }),
@@ -316,12 +316,12 @@ fn test_esm_constants() {
     );
     let ts_code = codegen.generate_module(&module, &[]).unwrap();
 
-    assert!(ts_code.contains("export const LED_PIN: number = 13;"), 
+    assert!(ts_code.contains("export const LedPin: number = 13;"), 
         "Expected exported constant, got:\n{}", ts_code);
-    assert!(ts_code.contains("const INTERNAL: number = 100;"), 
+    assert!(ts_code.contains("const Internal: number = 100;"), 
         "Expected non-exported constant, got:\n{}", ts_code);
-    assert!(!ts_code.contains("export const INTERNAL"), 
-        "INTERNAL should not be exported");
+    assert!(!ts_code.contains("export const Internal"), 
+        "Internal should not be exported");
 }
 
 #[test]

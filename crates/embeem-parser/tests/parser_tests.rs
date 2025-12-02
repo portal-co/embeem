@@ -30,14 +30,14 @@ fn test_parse_let_statement() {
 #[test]
 fn test_parse_const() {
     let src = r#"
-        const LED_PIN: u8 = 13;
+        const LedPin: u8 = 13;
         fn main() {}
     "#;
     let result = parse_program(src);
     assert!(result.is_ok());
     let prog = result.unwrap();
     assert_eq!(prog.constants.len(), 1);
-    assert_eq!(prog.constants[0].name, "LED_PIN");
+    assert_eq!(prog.constants[0].name, "LedPin");
 }
 
 #[test]
@@ -483,11 +483,11 @@ fn test_parse_module_with_imports() {
 #[test]
 fn test_parse_module_with_exports() {
     let src = r#"
-        export const LED_PIN: u8 = 13;
+        export const LedPin: u8 = 13;
         
         export fn blink(times: u32) {
             for i in 0 to times {
-                GPIO_TOGGLE(LED_PIN);
+                GPIO_TOGGLE(LedPin);
             }
         }
         
@@ -504,7 +504,7 @@ fn test_parse_module_with_exports() {
     // First item: exported const
     assert!(module.items[0].exported);
     if let Item::Const(c) = &module.items[0].item {
-        assert_eq!(c.name, "LED_PIN");
+        assert_eq!(c.name, "LedPin");
     } else {
         panic!("Expected const");
     }

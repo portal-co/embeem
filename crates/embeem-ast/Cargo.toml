@@ -10,6 +10,9 @@ repository.workspace = true
 
 [dev-dependencies]
 embeem-parser = { path = "../embeem-parser" }
+syn = { version = "2", features = ["full", "visit"] }
+walkdir = "2"
+proc-macro2 = "1"
 
 [features]
 default = ["alloc"]
