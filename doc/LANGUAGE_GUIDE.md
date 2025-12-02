@@ -50,6 +50,63 @@ fn main() {
 }
 ```
 
+## Naming Conventions
+
+Embeem has specific naming requirements to avoid conflicts with the operation namespace.
+
+### Reserved: UPPER_SNAKE_CASE
+
+**UPPER_SNAKE_CASE identifiers are reserved for operations** (built-in hardware primitives like `GPIO`, `WRITE`, `READ`, `DELAY_MS`, etc.). Using this style for your own code will cause parse errors.
+
+```embeem
+// ❌ WRONG - will conflict with operations
+const MAX_VALUE: u8 = 100;    // ERROR: reserved naming style
+let GPIO = 13;                // ERROR: reserved naming style
+
+// ✓ CORRECT - use PascalCase for constants
+const MaxValue: u8 = 100;
+const LedPin: u8 = 13;
+```
+
+### Recommended Naming Styles
+
+| Construct | Style | Examples |
+|-----------|-------|----------|
+| **Constants** | PascalCase | `MaxValue`, `LedPin`, `StateIdle` |
+| **Variables** | snake_case or camelCase | `led_state`, `buttonPin` |
+| **Functions** | snake_case | `read_sensor`, `update_display` |
+| **Parameters** | snake_case or camelCase | `pin_number`, `baudRate` |
+
+### Why PascalCase for Constants?
+
+PascalCase (`MaxValue`) provides clear visual distinction from:
+- **Operations** which use UPPER_SNAKE_CASE (`GPIO_WRITE`, `ADC_READ`)
+- **Variables** which use snake_case (`led_state`, `sensor_value`)
+
+This prevents accidentally triggering operation parsing and makes code intent clearer.
+
+### Quick Reference
+
+```embeem
+// Constants - PascalCase
+const ButtonPin: u8 = 2;
+const MaxRetries: u16 = 100;
+const StateRunning: u8 = 1;
+
+// Variables - snake_case or camelCase
+let mut led_state: u8 = 0;
+let sensorValue = READ(ADC(0));
+
+// Functions - snake_case
+fn read_temperature() -> i16 { ... }
+fn update_leds(value: u16) { ... }
+
+// Operations - UPPER_SNAKE_CASE (built-in only)
+WRITE(GPIO(ButtonPin), 1);
+SET_MODE(GPIO(13), Output);
+DELAY_MS(100);
+```
+
 ## Core Concepts
 
 ### Variables
@@ -323,30 +380,30 @@ fn fade_led(channel: u8) {
 ### State Machine
 
 ```embeem
-const STATE_IDLE: u8 = 0;
-const STATE_RUNNING: u8 = 1;
-const STATE_ERROR: u8 = 2;
+const StateIdle: u8 = 0;
+const StateRunning: u8 = 1;
+const StateError: u8 = 2;
 
 fn process_state(state: u8, input: u8) -> u8 {
-    if state == STATE_IDLE {
-        if input == START_CMD {
-            STATE_RUNNING
+    if state == StateIdle {
+        if input == StartCmd {
+            StateRunning
         } else {
-            STATE_IDLE
+            StateIdle
         }
-    } else if state == STATE_RUNNING {
-        if input == STOP_CMD {
-            STATE_IDLE
-        } else if input == ERROR_CMD {
-            STATE_ERROR
+    } else if state == StateRunning {
+        if input == StopCmd {
+            StateIdle
+        } else if input == ErrorCmd {
+            StateError
         } else {
-            STATE_RUNNING
+            StateRunning
         }
     } else {
-        if input == RESET_CMD {
-            STATE_IDLE
+        if input == ResetCmd {
+            StateIdle
         } else {
-            STATE_ERROR
+            StateError
         }
     }
 }
@@ -396,13 +453,15 @@ while AVAILABLE(UART(0)) == 0 max 1000 {
 
 ### 2. Use Constants
 
+Use **PascalCase** for constants. This is visually distinct from operations (UPPER_SNAKE_CASE) and avoids accidentally triggering operation parsing.
+
 ```embeem
-const BUFFER_SIZE: u16 = 256;
-const TIMEOUT_MS: u16 = 5000;
-const LED_PIN: u8 = 13;
+const BufferSize: u16 = 256;
+const TimeoutMs: u16 = 5000;
+const LedPin: u8 = 13;
 
 fn main() {
-    for i in 0 to BUFFER_SIZE - 1 {
+    for i in 0 to BufferSize - 1 {
         // ...
     }
 }
@@ -444,9 +503,9 @@ fn algorithm(input: u32) -> u32 {
 Embeem uses result values rather than exceptions:
 
 ```embeem
-const OK: u8 = 0;
-const ERR_TIMEOUT: u8 = 1;
-const ERR_INVALID: u8 = 2;
+const ResultOk: u8 = 0;
+const ErrTimeout: u8 = 1;
+const ErrInvalid: u8 = 2;
 
 fn read_with_timeout(channel: u8) -> (u8, u16) {
     let mut attempts = 0;
@@ -457,9 +516,9 @@ fn read_with_timeout(channel: u8) -> (u8, u16) {
     }
     
     if attempts >= 100 {
-        (ERR_TIMEOUT, 0)
+        (ErrTimeout, 0)
     } else {
-        (OK, READ(UART(channel)))
+        (ResultOk, READ(UART(channel)))
     }
 }
 ```

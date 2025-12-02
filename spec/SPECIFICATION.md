@@ -51,22 +51,31 @@ Reserved keywords cannot be used as identifiers.
 
 #### 2.1.1 Identifier Naming Conventions
 
-**UPPER_SNAKE_CASE is reserved for operations and constants.**
+**UPPER_SNAKE_CASE is reserved for operations.**
 
-Identifiers matching the pattern `[A-Z][A-Z0-9_]*` (starting with uppercase letter, containing only uppercase letters, digits, and underscores) are reserved for the operation namespace and for constants. They **cannot** be used as:
+Identifiers matching the pattern `[A-Z][A-Z0-9_]*` (starting with uppercase letter, containing only uppercase letters, digits, and underscores) are reserved for the operation namespace. They **cannot** be used as:
 - Variable names
-- Function names
+- Function names  
 - Type names
 - Parameter names
-
-However, UPPER_SNAKE_CASE **is allowed** for:
-- Constant names (declared with `const`)
+- **Constant names**
 
 This ensures:
 1. Future operations can be added without breaking existing programs
 2. Operations are visually distinct from user-defined identifiers
-3. Constants are visually distinct and follow common convention
-4. The parser can unambiguously distinguish operations from function calls
+3. The parser can unambiguously distinguish operations from function calls
+
+**Recommended naming styles:**
+
+| Construct | Style | Example |
+|-----------|-------|---------|
+| Variables | snake_case or camelCase | `led_pin`, `ledPin` |
+| Functions | snake_case | `read_sensor` |
+| Constants | PascalCase | `MaxValue`, `ButtonPin` |
+| Types | PascalCase | `SensorReading` |
+| Parameters | snake_case or camelCase | `channel`, `pinNumber` |
+
+Using **PascalCase for constants** provides visual distinction from both operations (UPPER_SNAKE_CASE) and variables (snake_case), while avoiding accidental conflicts with the reserved operation namespace.
 
 **Valid user identifiers:**
 ```embeem
@@ -76,7 +85,8 @@ let my_variable = 3;    // snake_case
 let MyType = 4;         // PascalCase
 let _private = 5;       // leading underscore
 let x1 = 6;             // with digits
-const MAX_VALUE: u32 = 100;  // UPPER_SNAKE_CASE for constants is OK
+const MaxValue: u32 = 100;   // PascalCase for constants
+const ButtonPin: u8 = 2;     // PascalCase for constants
 ```
 
 **Invalid user identifiers (reserved for operations):**
@@ -84,6 +94,7 @@ const MAX_VALUE: u32 = 100;  // UPPER_SNAKE_CASE for constants is OK
 let GPIO = 1;           // ERROR: UPPER_SNAKE_CASE in variable
 fn MY_FUNC() { }        // ERROR: UPPER_SNAKE_CASE in function name
 fn foo(ADC_CHANNEL: u8) { }  // ERROR: UPPER_SNAKE_CASE in parameter
+const MAX_VALUE: u32 = 100;  // ERROR: UPPER_SNAKE_CASE in constant
 ```
 
 ### 2.2 Keywords

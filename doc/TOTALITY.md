@@ -151,11 +151,27 @@ Since all expression forms terminate, the lemma holds. ∎
 *Proof*: Statements in Embeem are:
 
 1. **Let binding**: `let x = e;` - expression `e` terminates (Lemma 3.5)
-2. **Assignment**: `x = e;` - expression `e` terminates (Lemma 3.5)
-3. **Expression statement**: `e;` - terminates (Lemma 3.5)
-4. **If statement**: Condition and branches terminate (Lemma 3.5)
-5. **Loop statements**: Terminate (Lemma 3.4)
-6. **Block**: Sequence of statements; each terminates; block terminates
+2. **Simple Assignment**: `x = e;` - expression `e` terminates (Lemma 3.5)
+3. **Array Index Assignment**: `a[i] = e;` - expressions `i` and `e` terminate (Lemma 3.5)
+4. **Expression statement**: `e;` - terminates (Lemma 3.5)
+5. **If statement**: Condition and branches terminate (Lemma 3.5)
+6. **Loop statements**: Terminate (Lemma 3.4)
+7. **Block**: Sequence of statements; each terminates; block terminates
+
+∎
+
+### 3.6.1 Array Index Assignment Totality
+
+**Lemma 3.6.1**: Array index assignment `a[i] = e;` is total.
+
+*Proof*:
+1. The index expression `i` terminates (Lemma 3.5)
+2. The value expression `e` terminates (Lemma 3.5)
+3. The array bounds check is a finite comparison
+4. The memory write operation is primitive and completes in bounded time
+5. Therefore, the entire statement terminates
+
+Note: Array index assignment does not introduce any new control flow paths or recursion. It is semantically equivalent to a field update on a mutable data structure, which cannot cause divergence.
 
 ∎
 

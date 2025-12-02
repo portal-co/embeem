@@ -1,22 +1,22 @@
 // Example 6: I2C Temperature Sensor
 // Reads temperature from a common I2C sensor (e.g., TMP102)
 
-const I2C_NUM: u8 = 0;
-const SENSOR_ADDR: u8 = 0x48;  // TMP102 default address
-const TEMP_REG: u8 = 0x00;
+const I2cNum: u8 = 0;
+const SensorAddr: u8 = 0x48;  // TMP102 default address
+const TempReg: u8 = 0x00;
 
 fn read_temperature() -> i16 {
     // Start I2C transaction
-    START(I2C(I2C_NUM));
+    START(I2C(I2cNum));
     
     // Write register address
-    I2C_WRITE_TO(I2C_NUM, SENSOR_ADDR, TEMP_REG);
+    I2C_WRITE_TO(I2cNum, SensorAddr, TempReg);
     
     // Read 2 bytes (12-bit temperature)
-    let high = I2C_READ_FROM(I2C_NUM, SENSOR_ADDR);
-    let low = I2C_READ_FROM(I2C_NUM, SENSOR_ADDR);
+    let high = I2C_READ_FROM(I2cNum, SensorAddr);
+    let low = I2C_READ_FROM(I2cNum, SensorAddr);
     
-    STOP(I2C(I2C_NUM));
+    STOP(I2C(I2cNum));
     
     // Combine bytes and convert to temperature
     // TMP102 format: 12 bits, MSB first, 0.0625°C per bit
@@ -30,8 +30,8 @@ fn read_temperature() -> i16 {
 
 fn main() {
     // Initialize I2C
-    INIT(I2C(I2C_NUM));
-    SET_CLOCK(I2C(I2C_NUM), 100000);  // 100kHz standard mode
+    INIT(I2C(I2cNum));
+    SET_CLOCK(I2C(I2cNum), 100000);  // 100kHz standard mode
     
     // Setup LED indicator
     SET_MODE(GPIO(13), 1);

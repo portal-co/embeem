@@ -1,17 +1,17 @@
 // Example 9: Timer and Watchdog
 // Demonstrates timer operations and watchdog feeding
 
-const TIMER_NUM: u8 = 0;
-const WATCHDOG_TIMEOUT: u16 = 2000;  // 2 seconds
+const TimerNum: u8 = 0;
+const WatchdogTimeout: u16 = 2000;  // 2 seconds
 
 fn main() {
     // Initialize timer
-    SET_PERIOD(TIMER(TIMER_NUM), 1000);  // 1ms period
-    RESET(TIMER(TIMER_NUM));
-    START(TIMER(TIMER_NUM));
+    SET_PERIOD(TIMER(TimerNum), 1000);  // 1ms period
+    RESET(TIMER(TimerNum));
+    START(TIMER(TimerNum));
     
     // Enable watchdog
-    SET_TIMEOUT(WDT(), WATCHDOG_TIMEOUT);
+    SET_TIMEOUT(WDT(), WatchdogTimeout);
     ENABLE(WDT());
     
     // Setup LED
@@ -23,7 +23,7 @@ fn main() {
     // Main loop - 10000 iterations
     repeat 10000 {
         // Read current time
-        let current_time = READ(TIMER(TIMER_NUM));
+        let current_time = READ(TIMER(TimerNum));
         
         // Blink LED every 500ms
         if current_time - last_blink >= 500 {
@@ -40,6 +40,6 @@ fn main() {
     }
     
     // Cleanup
-    STOP(TIMER(TIMER_NUM));
+    STOP(TIMER(TimerNum));
     DISABLE(WDT());
 }

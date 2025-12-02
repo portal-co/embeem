@@ -362,9 +362,17 @@ fn validate_const_decl(c: &ConstDecl, ctx: &mut ValidationContext) -> Validation
     let mut result = ValidationResult::new();
 
     ctx.with_scope(&format!("const '{}'", c.name), |ctx| {
-        // Per spec section 2.1.1: UPPER_SNAKE_CASE is allowed for constants
-        // We only need to check that the name is a valid identifier syntax-wise
-        // (The spec allows UPPER_SNAKE_CASE specifically for constants)
+        // Per spec section 2.1.1: UPPER_SNAKE_CASE is reserved for operations
+        // Constants should use PascalCase instead
+        if !is_valid_user_identifier(&c.name) {
+            result.add_error(
+                ValidationErrorKind::ReservedIdentifier,
+                format!("constant name '{}' uses reserved UPPER_SNAKE_CASE pattern; use PascalCase instead (e.g., '{}')", 
+                    c.name, 
+                    to_pascal_case(&c.name)),
+                &ctx.context_string(),
+            );
+        }
 
         // Validate the value is a constant expression
         result.merge(validate_const_expr(&c.value, ctx));
@@ -374,6 +382,21 @@ fn validate_const_decl(c: &ConstDecl, ctx: &mut ValidationContext) -> Validation
     });
 
     result
+}
+
+/// Convert UPPER_SNAKE_CASE to PascalCase for error message suggestions.
+fn to_pascal_case(s: &str) -> String {
+    s.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => {
+                    first.to_uppercase().chain(chars.flat_map(|c| c.to_lowercase())).collect()
+                }
+            }
+        })
+        .collect()
 }
 
 fn validate_extern_fn(e: &ExternFn, ctx: &mut ValidationContext) -> ValidationResult {

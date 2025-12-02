@@ -2,12 +2,12 @@
 // Demonstrates floating point operations for signal processing
 
 // Constants for a simple low-pass filter
-const ALPHA: f32 = 0.1;  // Filter coefficient
+const Alpha: f32 = 0.1;  // Filter coefficient
 
 fn low_pass_filter(current: f32, previous: f32) -> f32 {
     // y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
-    let weighted_current = FMUL(ALPHA, current);
-    let one_minus_alpha = FSUB(1.0, ALPHA);
+    let weighted_current = FMUL(Alpha, current);
+    let one_minus_alpha = FSUB(1.0, Alpha);
     let weighted_previous = FMUL(one_minus_alpha, previous);
     FADD(weighted_current, weighted_previous)
 }
