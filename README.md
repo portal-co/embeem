@@ -62,3 +62,9 @@ This ensures:
 ## License
 
 See [LICENSE](LICENSE)
+
+## Progress
+- [ ] Initial setup
+
+---
+*AI assisted*
