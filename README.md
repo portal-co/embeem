@@ -63,8 +63,13 @@ This ensures:
 
 See [LICENSE](LICENSE)
 
+## Goals
+- [ ] Maintain language specification and tooling
+- [ ] Ensure totality proofs hold
+
 ## Progress
-- [ ] Initial setup
+- [ ] Language guide and specification available
+- [ ] Workspace setup with AST, parser, and codegen crates
 
 ---
 *AI assisted*
